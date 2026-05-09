@@ -105,3 +105,50 @@ jobs:
             sim_core/target/release/babel_gd.dll
             sim_core/target/release/libbabel_gd.dylib
           if-no-files-found: ignore
+
+  godot_smoke:
+    name: Godot 4.3 headless smoke test
+    runs-on: ubuntu-24.04
+    needs: build_gdext
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sim_core/target
+          key: Linux-cargo-gdext-${{ hashFiles('sim_core/Cargo.lock', 'sim_core/**/Cargo.toml') }}
+
+      - name: Build GDExtension (debug)
+        run: ./tools/build_gdext.sh debug
+
+      - name: Install Godot 4.3
+        run: |
+          mkdir -p "$HOME/godot"
+          curl -fsSL -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
+          unzip -q /tmp/godot.zip -d "$HOME/godot"
+          mv "$HOME/godot/Godot_v4.3-stable_linux.x86_64" "$HOME/godot/godot"
+          chmod +x "$HOME/godot/godot"
+          echo "$HOME/godot" >> "$GITHUB_PATH"
+
+      - name: Import project
+        run: godot --headless --editor --import --path godot_project
+
+      - name: Run project (headless) and verify extension loads
+        run: |
+          set -o pipefail
+          out=$(godot --headless --path godot_project --quit 2>&1 | tee /dev/stderr)
+          # The autoload prints this exact line iff BabelSim was registered.
+          echo "$out" | grep -F "[GameState] BabelSim extension loaded."
+          # And no stub fallbacks should fire.
+          if echo "$out" | grep -F "BabelSim extension NOT loaded"; then
+            echo "::error::BabelSim failed to register at runtime"
+            exit 1
+          fi
