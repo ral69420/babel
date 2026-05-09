@@ -117,6 +117,32 @@ impl SimHandle {
         self.world.as_ref().map_or(0, |w| w.calendar().year)
     }
 
+    /// Current day-of-year `0..=359`.
+    #[must_use]
+    pub fn day_of_year(&self) -> u32 {
+        self.world.as_ref().map_or(0, |w| w.calendar().day_of_year)
+    }
+
+    /// Current hour-of-day `0..=23`.
+    #[must_use]
+    pub fn hour(&self) -> u32 {
+        self.world.as_ref().map_or(0, |w| w.calendar().hour)
+    }
+
+    /// Season as `u8` — 0=Spring, 1=Summer, 2=Autumn, 3=Winter.
+    #[must_use]
+    pub fn season(&self) -> u8 {
+        self.world.as_ref().map_or(0, |w| {
+            use babel_sim::Season;
+            match w.calendar().season() {
+                Season::Spring => 0,
+                Season::Summer => 1,
+                Season::Autumn => 2,
+                Season::Winter => 3,
+            }
+        })
+    }
+
     /// `(width, height)` of the current world, or `(0, 0)`.
     #[must_use]
     pub fn dims(&self) -> (u32, u32) {

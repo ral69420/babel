@@ -14,7 +14,8 @@ const DEFAULT_WIDTH := 256
 const DEFAULT_HEIGHT := 256
 const TICKS_PER_FRAME := 1
 
-@onready var world_view: Node2D = $WorldView
+@onready var world_view: Node2D = $WorldRoot/WorldView
+@onready var camera: Camera2D = $WorldRoot/CameraRig
 @onready var hud: CanvasLayer = $HUD
 
 func _ready() -> void:
@@ -24,9 +25,11 @@ func _ready() -> void:
 			push_warning("[Main] Failed to start world. Check BabelSim extension.")
 		else:
 			world_view.bind(GameState)
-			hud.bind(GameState)
+			camera.set_world_rect(world_view.world_rect())
+			hud.bind(GameState, world_view, camera)
 	else:
 		push_warning("[Main] No sim. Running in inert mode.")
+		hud.bind(null, null, null)
 
 func _process(_delta: float) -> void:
 	if GameState.sim_ready:

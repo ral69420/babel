@@ -71,3 +71,18 @@ func year() -> int:
 	if not sim_ready:
 		return 0
 	return sim.year()
+
+func day_of_year() -> int:
+	if not sim_ready:
+		return 0
+	return sim.day_of_year()
+
+func hour() -> int:
+	if not sim_ready:
+		return 0
+	return sim.hour()
+
+func season() -> int:
+	if not sim_ready:
+		return 0
+	return sim.season()

@@ -49,6 +49,24 @@ impl BabelSim {
         self.inner.year() as i32
     }
 
+    /// Day of year `0..=359`.
+    #[func]
+    fn day_of_year(&self) -> i32 {
+        self.inner.day_of_year() as i32
+    }
+
+    /// Hour of day `0..=23`.
+    #[func]
+    fn hour(&self) -> i32 {
+        self.inner.hour() as i32
+    }
+
+    /// Season `0..=3` (Spring/Summer/Autumn/Winter).
+    #[func]
+    fn season(&self) -> i32 {
+        i32::from(self.inner.season())
+    }
+
     /// Current ticks.
     #[func]
     fn ticks(&self) -> i64 {
