@@ -2,11 +2,11 @@ extends Camera2D
 ## Pannable, zoomable observer camera.
 ##
 ## Babel is an *observation* game — the camera is the player's primary
-## interaction. Three input modes, all mappable later:
+## interaction. Four input modes, all mappable later:
 ##
-##   - Mouse wheel        → smooth zoom around the cursor
-##   - Right/middle drag  → pan
-##   - WASD / arrows      → pan with keyboard, scaled by current zoom
+##   - Mouse wheel              → smooth zoom around the cursor
+##   - Left / right / middle    → click-and-drag to pan the map
+##   - WASD / arrows            → pan with keyboard, scaled by current zoom
 ##
 ## The camera clamps itself to the map rect (no flying off into the void).
 
@@ -58,7 +58,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_at(mb.position, ZOOM_STEP)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_zoom_at(mb.position, 1.0 / ZOOM_STEP)
-		elif mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_MIDDLE:
+		elif mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_MIDDLE:
 			_drag_active = mb.pressed
 			_drag_anchor = mb.position
 	elif event is InputEventMouseMotion and _drag_active:
