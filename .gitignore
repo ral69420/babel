@@ -42,12 +42,13 @@ venv/
 *.dylib
 *.pdb
 
-# Built GDExtension libraries are NOT checked in. They are produced by
-# `tools/build_gdext.sh` locally or by the `build_gdext` CI job (uploaded as
-# an artifact). Run the build script before opening the Godot project.
-/godot_project/addons/babel_gd/lib/*.so
-/godot_project/addons/babel_gd/lib/*.dll
-/godot_project/addons/babel_gd/lib/*.dylib
+# Built GDExtension libraries ARE checked in for now so the Godot project opens
+# cleanly on every platform without requiring users to install a Rust toolchain.
+# When binaries get too heavy we'll switch to CI artifacts. Local rebuilds:
+# `tools/build_gdext.sh` (Linux/macOS) or cross-compile via mingw for Windows.
+!/godot_project/addons/babel_gd/lib/*.so
+!/godot_project/addons/babel_gd/lib/*.dll
+!/godot_project/addons/babel_gd/lib/*.dylib
 
 # Logs / dumps
 *.log
