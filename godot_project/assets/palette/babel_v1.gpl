@@ -1,0 +1,39 @@
+GIMP Palette
+Name: Babel v1
+Columns: 8
+# 32-colour locked palette for Babel.
+# Groups: A earth (8) | B vegetation (5) | C water (4) | D sky/cool stone (4)
+#         E warm accent (4) | F ritual/magic (4) | G bone/ash/fade (3)
+# Anything outside this palette will be rejected by tools/asset_lint.py.
+ 26  15  10	A1 earth darkest
+ 44  29  16	A2 earth deep
+ 74  53  34	A3 earth umber
+107  76  47	A4 earth medium
+138 104  69	A5 earth tan
+169 138 100	A6 earth sand
+201 177 138	A7 earth pale sand
+230 211 179	A8 earth bone-cream
+ 14  33  23	B1 forest deep
+ 27  59  39	B2 moss dark
+ 47 107  63	B3 moss
+ 79 150  87	B4 leaf
+135 184 106	B5 grass highlight
+ 10  26  44	C1 ocean abyss
+ 20  48  74	C2 ocean deep
+ 42  91 134	C3 water mid
+ 95 163 201	C4 water highlight
+ 59  63  85	D1 cool stone dark
+ 91  96 128	D2 cool stone mid
+138 144 168	D3 cool stone light
+195 200 217	D4 sky pale
+ 63  21  24	E1 warm accent dark
+122  42  35	E2 ember
+196  90  54	E3 sunset orange
+240 164  90	E4 ritual gold
+ 43  26  59	F1 violet abyss
+ 91  46 122	F2 deep magic
+180  99 207	F3 magic
+243 200 255	F4 magic highlight
+232 227 211	G1 bone
+184 177 160	G2 ash
+107 103  87	G3 fade grey
