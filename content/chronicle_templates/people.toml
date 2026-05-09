@@ -1,0 +1,29 @@
+# NPC life-event templates.
+
+[[entry]]
+id = "npc_born_001"
+kind = "NpcBorn"
+lines = [
+  "In year {year}, a child was born to the {civ_endonym}.",
+]
+
+[[entry]]
+id = "npc_born_002"
+kind = "NpcBorn"
+lines = [
+  "On day {day} of year {year}, the {civ_endonym} welcomed a new child into the chronicle.",
+]
+
+[[entry]]
+id = "npc_died_001"
+kind = "NpcDied"
+lines = [
+  "In year {year}, one of the {civ_endonym} laid down their burdens for the last time.",
+]
+
+[[entry]]
+id = "npc_died_002"
+kind = "NpcDied"
+lines = [
+  "On day {day} of year {year}, the {civ_endonym} held a vigil for one of their own.",
+]

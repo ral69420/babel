@@ -1,0 +1,62 @@
+# Core hand-authored traditions.
+#
+# Traditions are NOT procedurally generated. They are hand-written here and
+# the sim picks from this pool when a civ adopts a new tradition. Traditions
+# affect behaviour via tagged effects (loyalty/piety bonuses, faction-spawn
+# rates, etc.).
+
+[[tradition]]
+id = "tradition.harvest_silence"
+name = "The Day of Harvest Silence"
+short = "On the first day of autumn no one speaks."
+tags = ["seasonal", "speech", "ritual"]
+effects = { loyalty_bonus = 4, faction_pressure = 2 }
+
+[[tradition]]
+id = "tradition.namesake_burial"
+name = "Namesake Burial"
+short = "The dead are buried with the names they last spoke."
+tags = ["death", "memory"]
+effects = { piety_bonus = 5, chronicle_bonus = 1 }
+
+[[tradition]]
+id = "tradition.river_offering"
+name = "Offering to the River"
+short = "Each spring, a small loaf of bread is given to the nearest river."
+tags = ["seasonal", "water", "ritual"]
+effects = { piety_bonus = 3, food_loss = 1 }
+
+[[tradition]]
+id = "tradition.foreigner_guest"
+name = "The Foreigner is a Guest"
+short = "Visitors are housed and fed for three nights without question."
+tags = ["hospitality", "trade"]
+effects = { trade_bonus = 4, security_loss = 1 }
+
+[[tradition]]
+id = "tradition.sleepless_council"
+name = "The Sleepless Council"
+short = "Once a year the council debates without rest until the question is answered."
+tags = ["governance", "ritual"]
+effects = { decision_quality = 3, health_loss = 1 }
+
+[[tradition]]
+id = "tradition.first_word_spoken"
+name = "The First Word Spoken"
+short = "A child is given a name only after they speak their first word — which becomes that name."
+tags = ["birth", "language"]
+effects = { language_bonus = 2 }
+
+[[tradition]]
+id = "tradition.broken_pot"
+name = "Broken Pot"
+short = "A grievance is settled by both sides smashing the same pot."
+tags = ["conflict", "ritual"]
+effects = { faction_pressure = -3 }
+
+[[tradition]]
+id = "tradition.lantern_walk"
+name = "Lantern Walk"
+short = "On the longest night, the chronicler walks the streets with a single lantern."
+tags = ["seasonal", "ritual"]
+effects = { piety_bonus = 2, chronicle_bonus = 2 }

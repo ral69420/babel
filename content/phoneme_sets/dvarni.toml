@@ -1,0 +1,18 @@
+# Dvarni — heavy clusters, hard consonants, "stone-mountain" feel.
+# Inspired by Slavic / Caucasian phonotactics, hand-tuned.
+
+name = "dvarni"
+consonants = ["d", "dr", "v", "vr", "k", "kr", "t", "tr", "g", "gn", "n", "r", "z", "zh"]
+vowels     = ["a", "e", "i", "o", "y"]
+syllables  = ["CV", "CVC", "CCV", "CVCC"]
+banned     = ["drdr", "trtr", "krkr", "zhzh"]
+example_words = [
+  "dvarn",
+  "krezno",
+  "trogo",
+  "vrask",
+  "drozhin",
+  "gnariv",
+  "ydrak",
+  "zelot",
+]

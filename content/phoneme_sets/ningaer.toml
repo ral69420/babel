@@ -1,0 +1,18 @@
+# Ningaer — soft, palatalised, "snow-tundra" feel.
+# Inspired by Finnic / Inuktitut phonotactics, hand-tuned.
+
+name = "ningaer"
+consonants = ["n", "ng", "k", "p", "t", "s", "j", "l", "v", "h"]
+vowels     = ["a", "e", "i", "o", "u", "ae", "oe", "uu"]
+syllables  = ["CV", "VCV", "CVCV"]
+banned     = ["ngng", "ll"]
+example_words = [
+  "ningaer",
+  "kaipa",
+  "salmoe",
+  "tuonel",
+  "vaelika",
+  "noensi",
+  "huuraj",
+  "pajalo",
+]

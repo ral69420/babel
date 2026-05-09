@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/babel_sim",
+    "crates/babel_lang",
+    "crates/babel_chronicle",
+    "crates/babel_save",
+    "crates/babel_gd",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+authors = ["ral69420"]
+license = "MIT"
+repository = "https://github.com/ral69420/babel"
+
+[workspace.dependencies]
+# Internal
+babel_sim       = { path = "crates/babel_sim" }
+babel_lang      = { path = "crates/babel_lang" }
+babel_chronicle = { path = "crates/babel_chronicle" }
+babel_save      = { path = "crates/babel_save" }
+
+# External — pinned to keep determinism + reproducible builds
+serde            = { version = "1.0", features = ["derive"] }
+serde_bytes      = "0.11"
+toml             = "0.8"
+ron              = "0.8"
+bincode          = "1.3"
+zstd             = { version = "0.13", default-features = false }
+thiserror        = "1.0"
+log              = "0.4"
+ahash            = { version = "0.8", default-features = false, features = ["std"] }
+
+# Deterministic RNG: xoroshiro256++ via rand_xoshiro
+rand_core        = "0.6"
+rand_xoshiro     = { version = "0.6", features = ["serde1"] }
+
+# Procedural noise (worldgen)
+noise            = "0.9"
+
+[profile.dev]
+opt-level = 1            # sim is too slow at -O0 even for dev
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = 1                 # keep some debug info for profiling
+
+[profile.bench]
+inherits = "release"
+debug = true
+
+[profile.test]
+opt-level = 1

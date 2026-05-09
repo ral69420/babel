@@ -1,0 +1,107 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Sane defaults: stop in-progress jobs on the same branch when a new commit
+# lands, never run two CI jobs for the same PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  lint:
+    name: rustfmt + clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sim_core/target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('sim_core/Cargo.lock', 'sim_core/**/Cargo.toml') }}
+
+      - name: Format check
+        working-directory: sim_core
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: sim_core
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: cargo test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sim_core/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('sim_core/Cargo.lock', 'sim_core/**/Cargo.toml') }}
+
+      - name: Test (workspace, default features)
+        working-directory: sim_core
+        run: cargo test --workspace --all-targets
+
+  build_gdext:
+    name: Build GDExtension (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sim_core/target
+          key: ${{ runner.os }}-cargo-gdext-${{ hashFiles('sim_core/Cargo.lock', 'sim_core/**/Cargo.toml') }}
+
+      - name: Build babel_gd (release, --features gdext)
+        working-directory: sim_core
+        run: cargo build -p babel_gd --features gdext --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: babel_gd-${{ runner.os }}
+          path: |
+            sim_core/target/release/libbabel_gd.so
+            sim_core/target/release/babel_gd.dll
+            sim_core/target/release/libbabel_gd.dylib
+          if-no-files-found: ignore

@@ -1,0 +1,38 @@
+# Core hand-authored religion archetypes. Sim picks one when founding a civ
+# and parameterises it (deity name from the civ's language).
+
+[[archetype]]
+id = "religion.weaver"
+name = "Cult of the Weaver"
+short = "All things are threads in a single tapestry."
+tenets = ["unity", "memory", "patience"]
+
+[[archetype]]
+id = "religion.hearth"
+name = "Hearth Faith"
+short = "The home is the only sacred place."
+tenets = ["family", "hospitality"]
+
+[[archetype]]
+id = "religion.river"
+name = "River Mothers"
+short = "Water is the first ancestor."
+tenets = ["water", "matriarchy"]
+
+[[archetype]]
+id = "religion.silence"
+name = "The Silent Order"
+short = "What is not spoken cannot be unmade."
+tenets = ["silence", "memory"]
+
+[[archetype]]
+id = "religion.flame"
+name = "The Pure Flame"
+short = "Fire purifies what cannot be argued."
+tenets = ["fire", "purification"]
+
+[[archetype]]
+id = "religion.sky_eyes"
+name = "Sky Eyes"
+short = "The stars watch and remember."
+tenets = ["stars", "judgement"]

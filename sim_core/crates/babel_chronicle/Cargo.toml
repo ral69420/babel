@@ -1,0 +1,23 @@
+[package]
+name = "babel_chronicle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Template-based chronicle writer (no LLM, no AI)."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+babel_sim    = { workspace = true }
+babel_lang   = { workspace = true }
+serde        = { workspace = true }
+toml         = { workspace = true }
+thiserror    = { workspace = true }
+ahash        = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

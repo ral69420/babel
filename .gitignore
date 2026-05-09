@@ -1,0 +1,61 @@
+# Rust
+/sim_core/target/
+# NOTE: Cargo.lock IS committed — this is an application, not a library.
+# Reproducible builds matter more than letting downstream pick versions.
+**/*.rs.bk
+
+# Godot
+.godot/
+.import/
+*.translation
+export.cfg
+export_presets.cfg
+.tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+.cursor/
+.zed/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Build artifacts
+/build/
+/dist/
+*.so
+*.dll
+*.dylib
+*.pdb
+
+# Built GDExtension libraries are NOT checked in. They are produced by
+# `tools/build_gdext.sh` locally or by the `build_gdext` CI job (uploaded as
+# an artifact). Run the build script before opening the Godot project.
+/godot_project/addons/babel_gd/lib/*.so
+/godot_project/addons/babel_gd/lib/*.dll
+/godot_project/addons/babel_gd/lib/*.dylib
+
+# Logs / dumps
+*.log
+saves/
+exports/
+profiling/
+
+# Tooling
+.coverage
+coverage.xml
+htmlcov/

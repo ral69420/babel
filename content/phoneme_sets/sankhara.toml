@@ -1,0 +1,18 @@
+# Sankhara — retroflex, aspirated, "river-temple" feel.
+# Inspired by Sanskrit / Tamil phonotactics, hand-tuned.
+
+name = "sankhara"
+consonants = ["s", "sh", "n", "m", "p", "ph", "k", "kh", "t", "th", "r", "v", "y", "h"]
+vowels     = ["a", "i", "u", "e", "o", "aa", "ii"]
+syllables  = ["CV", "CVC", "CVCV"]
+banned     = ["thth", "khkh", "phph", "shsh"]
+example_words = [
+  "sankhara",
+  "ravidya",
+  "manaya",
+  "shimara",
+  "panavi",
+  "khamatu",
+  "yashika",
+  "thirana",
+]

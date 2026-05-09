@@ -1,0 +1,18 @@
+# Eluran — flowing, lateral-rich, "forest-twilight" feel.
+# Inspired by Sindarin / Welsh phonotactics, hand-tuned.
+
+name = "eluran"
+consonants = ["l", "ll", "th", "dh", "n", "m", "r", "s", "f", "g", "h", "y"]
+vowels     = ["a", "e", "i", "o", "u", "ae", "io"]
+syllables  = ["CV", "CVC", "VC", "V"]
+banned     = ["llll", "rr", "thth"]
+example_words = [
+  "eluran",
+  "naeloth",
+  "silimor",
+  "fynnel",
+  "aelir",
+  "merionas",
+  "thalion",
+  "ioraen",
+]

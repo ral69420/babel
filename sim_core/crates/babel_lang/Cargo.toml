@@ -1,0 +1,22 @@
+[package]
+name = "babel_lang"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Procedural language generation (Markov chain over phoneme sets, no LLM)."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+babel_sim    = { workspace = true }
+serde        = { workspace = true }
+toml         = { workspace = true }
+thiserror    = { workspace = true }
+ahash        = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

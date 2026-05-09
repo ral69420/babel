@@ -1,0 +1,39 @@
+[package]
+name = "babel_gd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GDExtension bindings for Godot 4.3 — exposes the sim core to GDScript."
+
+[lib]
+# `cdylib` produces the .so/.dll/.dylib that Godot loads as a GDExtension.
+# `rlib`   keeps the crate testable from `cargo test` without Godot at all.
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+# `gdext` flag is the *only* way to pull in the godot crate. Without it the
+# crate compiles as a thin pass-through. CI builds with the feature enabled
+# only on jobs that have the matching Godot artifact installed.
+default = []
+gdext = ["dep:godot"]
+
+[dependencies]
+babel_sim       = { workspace = true }
+babel_lang      = { workspace = true }
+babel_chronicle = { workspace = true }
+babel_save      = { workspace = true }
+
+# Optional — only when --features gdext is passed.
+godot = { version = "0.2.4", optional = true }
+
+# NOTE: babel_gd is the *only* crate in this workspace where `unsafe` is
+# allowed. It is unavoidable here — the `ExtensionLibrary` trait from the
+# `godot` crate is `unsafe trait`, and registering an entry point requires
+# `unsafe impl`. Every other crate sets `unsafe_code = "forbid"`.
+# We still flag stray `unsafe` usage as a warning so review can audit it.
+[lints.rust]
+unsafe_code = "warn"

@@ -1,0 +1,48 @@
+# Founding-event templates. Hand-written, no LLM. Slot tokens:
+#   {year}          — game year of the event
+#   {day}           — day of year
+#   {civ_name}      — civ display name (in player's tongue)
+#   {civ_endonym}   — what the civ calls itself
+#   {city_name}     — for CityFounded events
+
+[[entry]]
+id = "civ_founded_001"
+kind = "CivFounded"
+lines = [
+  "In year {year} the people of {civ_name} first gathered under one banner. They called themselves {civ_endonym}, and the elders agreed that this was a beginning.",
+]
+
+[[entry]]
+id = "civ_founded_002"
+kind = "CivFounded"
+lines = [
+  "On day {day} of year {year}, a council of seven was held. From that day forward they were the {civ_endonym}, the people of {civ_name}.",
+]
+
+[[entry]]
+id = "civ_founded_003"
+kind = "CivFounded"
+lines = [
+  "It is said that in year {year} the smoke of the first hearth marked the founding of {civ_name}. The {civ_endonym} have counted their years from this fire ever since.",
+]
+
+[[entry]]
+id = "city_founded_001"
+kind = "CityFounded"
+lines = [
+  "In year {year} the city of {city_name} was founded by the {civ_endonym}. Its first stones were laid by hands that did not yet know the city's name.",
+]
+
+[[entry]]
+id = "city_founded_002"
+kind = "CityFounded"
+lines = [
+  "On day {day} of year {year}, {city_name} was raised. The {civ_endonym} say its walls remember every name spoken inside them.",
+]
+
+[[entry]]
+id = "world_generated_001"
+kind = "WorldGenerated"
+lines = [
+  "Before the years were counted, before any civ had a name, the world simply was. The chronicle begins here.",
+]

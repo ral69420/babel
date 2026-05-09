@@ -1,0 +1,18 @@
+# Qarasil — guttural, ejective, "desert-trader" feel.
+# Inspired by Arabic / Hebrew phonotactics, hand-tuned.
+
+name = "qarasil"
+consonants = ["q", "kh", "gh", "h", "b", "d", "l", "m", "n", "r", "s", "z", "t"]
+vowels     = ["a", "i", "u", "aa", "ii", "uu"]
+syllables  = ["CV", "CVC", "CVCC", "CVVC"]
+banned     = ["qq", "khkh", "ghgh", "rr"]
+example_words = [
+  "qarasil",
+  "naabir",
+  "haluk",
+  "ghadan",
+  "khumri",
+  "balad",
+  "samiir",
+  "tuzab",
+]

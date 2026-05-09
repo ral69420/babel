@@ -1,0 +1,20 @@
+# Kheltari — fricative-rich, sibilant, "sand-stone" feel.
+# Inspired by Akkadian / Aramaic / Dothraki phonotactics, hand-tuned.
+
+name = "kheltari"
+consonants = ["k", "kh", "th", "sh", "s", "z", "n", "m", "l", "r", "v", "h"]
+vowels     = ["a", "e", "i", "o", "u", "ai", "au"]
+syllables  = ["CV", "CVC", "VC"]
+banned     = ["thth", "khkh", "rr", "shsh", "zz"]
+example_words = [
+  "kheltar",
+  "linov",
+  "azumai",
+  "shenak",
+  "thoral",
+  "vesari",
+  "mizath",
+  "khenari",
+  "loshei",
+  "auvar",
+]

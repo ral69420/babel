@@ -1,0 +1,50 @@
+# Tradition / faction / culture-shift templates.
+
+[[entry]]
+id = "tradition_adopted_001"
+kind = "TraditionAdopted"
+lines = [
+  "In year {year}, the {civ_endonym} agreed upon a new custom. The elders said it would last forever; the chronicle does not yet know if they were right.",
+]
+
+[[entry]]
+id = "tradition_broken_001"
+kind = "TraditionBroken"
+lines = [
+  "In year {year}, a faction of the {civ_endonym} broke an old custom. There was no immediate sky-fall, but there were many quiet glances.",
+]
+
+[[entry]]
+id = "faction_founded_001"
+kind = "FactionFounded"
+lines = [
+  "In year {year}, a faction rose within {civ_name}. It would later count itself as the first of many.",
+]
+
+[[entry]]
+id = "concept_fading_001"
+kind = "ConceptFading"
+lines = [
+  "In year {year}, the {civ_endonym} reported that a word no longer felt like itself. By the next morning, no one remembered what it had once meant.",
+]
+
+[[entry]]
+id = "war_declared_001"
+kind = "WarDeclared"
+lines = [
+  "In year {year}, war was declared. The chroniclers of both peoples will write very different accounts of this day.",
+]
+
+[[entry]]
+id = "peace_made_001"
+kind = "PeaceMade"
+lines = [
+  "In year {year}, the war was ended. The peace, as always, was less a celebration than a tired silence.",
+]
+
+[[entry]]
+id = "zone_appeared_001"
+kind = "ZoneAppeared"
+lines = [
+  "In year {year}, a place was reported where the world bent strangely. No one would name it; no one would walk near it.",
+]

@@ -1,0 +1,24 @@
+[package]
+name = "babel_save"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Binary + zstd save/load with versioned migrations."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+babel_sim    = { workspace = true }
+serde        = { workspace = true }
+serde_bytes  = { workspace = true }
+bincode      = { workspace = true }
+zstd         = { workspace = true }
+thiserror    = { workspace = true }
+log          = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,18 @@
+# Orunmare — soft, vowel-heavy, "river-island" feel.
+# Inspired by Polynesian / Yoruba phonotactics, hand-tuned.
+
+name = "orunmare"
+consonants = ["m", "n", "ng", "p", "t", "k", "l", "r", "w", "y"]
+vowels     = ["a", "e", "i", "o", "u", "aa", "ee", "oo"]
+syllables  = ["CV", "V", "CVV"]
+banned     = ["ngng", "ll", "ww"]
+example_words = [
+  "orunmare",
+  "anuwa",
+  "tewani",
+  "lokopi",
+  "marioo",
+  "yataka",
+  "kepani",
+  "moroweli",
+]

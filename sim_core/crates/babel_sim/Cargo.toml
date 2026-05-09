@@ -1,0 +1,36 @@
+[package]
+name = "babel_sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic core simulation for Babel"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde            = { workspace = true }
+thiserror        = { workspace = true }
+log              = { workspace = true }
+ahash            = { workspace = true }
+rand_core        = { workspace = true }
+rand_xoshiro     = { workspace = true }
+noise            = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# Catch real bugs, not style.
+correctness = { level = "deny",  priority = -1 }
+suspicious  = { level = "deny",  priority = -1 }
+perf        = { level = "warn",  priority = -1 }
+style       = { level = "warn",  priority = -1 }
+# Determinism guard — populated as we add new banned APIs.
+disallowed_methods = "warn"

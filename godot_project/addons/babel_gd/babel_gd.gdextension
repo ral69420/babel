@@ -1,0 +1,30 @@
+[configuration]
+
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = "4.3"
+reloadable = true
+
+[libraries]
+
+# Built by `tools/build_gdext.sh`. Keys follow Godot 4.3's feature flag
+# system: every dot-segment is a flag (`linux`, `editor`, `x86_64`, ...) and
+# the entry is selected only if every flag is active.
+#
+# At runtime, Godot is *either* in editor mode (`editor` flag active) or in
+# an exported game (`debug` / `release` flag active). We point all of them
+# at the same .so for now; once we ship a release matrix in CI we'll
+# replace the editor build with optimised template builds.
+linux.editor.x86_64           = "res://addons/babel_gd/lib/libbabel_gd.so"
+linux.editor.arm64            = "res://addons/babel_gd/lib/libbabel_gd.so"
+linux.debug.x86_64            = "res://addons/babel_gd/lib/libbabel_gd.so"
+linux.debug.arm64             = "res://addons/babel_gd/lib/libbabel_gd.so"
+linux.release.x86_64          = "res://addons/babel_gd/lib/libbabel_gd.so"
+linux.release.arm64           = "res://addons/babel_gd/lib/libbabel_gd.so"
+
+windows.editor.x86_64           = "res://addons/babel_gd/lib/babel_gd.dll"
+windows.debug.x86_64            = "res://addons/babel_gd/lib/babel_gd.dll"
+windows.release.x86_64          = "res://addons/babel_gd/lib/babel_gd.dll"
+
+macos.editor                    = "res://addons/babel_gd/lib/libbabel_gd.dylib"
+macos.debug                     = "res://addons/babel_gd/lib/libbabel_gd.dylib"
+macos.release                   = "res://addons/babel_gd/lib/libbabel_gd.dylib"
