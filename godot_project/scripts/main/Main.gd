@@ -7,9 +7,6 @@ extends Node3D
 ##   - hand off rendering to [HexGrid]
 ##   - hand off UI to [HUD]
 
-const DEFAULT_SEED := 0x000B_ABE1
-const DEFAULT_WIDTH := 256
-const DEFAULT_HEIGHT := 256
 const TICKS_PER_FRAME := 1
 
 @onready var hex_grid: Node3D = $WorldRoot/HexGrid
@@ -17,8 +14,21 @@ const TICKS_PER_FRAME := 1
 @onready var hud: CanvasLayer = $HUD
 
 func _ready() -> void:
+	start_game()
+
+## Boot the world using the parameters in [RunConfig].
+##
+## Safe to call when Main.tscn is opened directly during development —
+## [RunConfig.ensure_defaults] fills in fallbacks matching the previous
+## hard-coded values. The menu / new-game flow populates RunConfig first.
+func start_game() -> void:
+	RunConfig.ensure_defaults()
 	if GameState.sim_ready:
-		var ok := GameState.start_world(DEFAULT_SEED, DEFAULT_WIDTH, DEFAULT_HEIGHT)
+		var ok := GameState.start_world(
+			RunConfig.seed,
+			RunConfig.map_width,
+			RunConfig.map_height,
+		)
 		if not ok:
 			push_warning("[Main] Failed to start world.")
 		else:
