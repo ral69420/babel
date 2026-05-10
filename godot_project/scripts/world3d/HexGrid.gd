@@ -1,12 +1,13 @@
 extends Node3D
-## Generates a 3D hex-tile terrain mesh with elevation and biome textures.
+## Generates a 3D hex-tile terrain mesh with smooth realistic elevation.
 ##
-## Uses flat-top hexagons in axial coordinates (q, r).
-## Each hex becomes geometry in a batched ArrayMesh for performance.
+## Uses flat-top hexagons in offset coordinates (q, r).
+## Terrain has smooth elevation transitions using neighbor averaging.
+## Buildings are anchored to the hex surface (no billboard).
 
-const HEX_SIZE := 1.0          ## Outer radius of each hex.
-const SQRT3 := 1.7320508        ## sqrt(3)
-const ELEV_SCALE := 0.015       ## World-units per elevation unit (0..255).
+const HEX_SIZE := 1.0
+const SQRT3 := 1.7320508
+const ELEV_SCALE := 0.025       ## More pronounced elevation.
 
 const BIOME_TEXTURES := [
 	"res://assets/tiles/ocean/ocean.png",
@@ -20,14 +21,14 @@ const BIOME_TEXTURES := [
 ]
 
 const BIOME_BASE_ELEV := [
-	-0.5,   # Ocean — below sea level
-	-0.05,  # Coast — just at water line
-	0.0,    # Plains — flat
-	0.1,    # Forest — slight rise
-	0.4,    # Hills
-	1.2,    # Mountain — tall
-	0.05,   # Desert — flat
-	0.15,   # Tundra — slight rise
+	-0.8,   # Ocean
+	-0.05,  # Coast
+	0.0,    # Plains
+	0.15,   # Forest
+	0.6,    # Hills
+	1.8,    # Mountain — tall peaks
+	0.05,   # Desert
+	0.2,    # Tundra
 ]
 
 const CIV_COLORS := [
@@ -44,6 +45,7 @@ var _npc_sprites: Dictionary = {}
 var _building_sprites: Dictionary = {}
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
+var _smooth_elev: PackedFloat32Array  ## Pre-computed smoothed elevation per tile.
 
 func _ready() -> void:
 	_npc_texture = load("res://assets/npcs/default/walk_south.png") as Texture2D
@@ -57,21 +59,20 @@ func bind(state: Node) -> void:
 	_dims = state.dims()
 	if _dims.x <= 0 or _dims.y <= 0:
 		return
+	_precompute_smooth_elevation()
 	_build_terrain()
 
 func world_rect_3d() -> AABB:
 	var max_x: float = HEX_SIZE * 1.5 * _dims.x
 	var max_z: float = HEX_SIZE * SQRT3 * _dims.y
-	return AABB(Vector3.ZERO, Vector3(max_x, 3.0, max_z))
+	return AABB(Vector3.ZERO, Vector3(max_x, 4.0, max_z))
 
-## Convert axial hex coords (q, r) to 3D world position (flat-top hex).
 func hex_to_world(q: int, r: int) -> Vector3:
 	var x: float = HEX_SIZE * 1.5 * q
 	var z: float = HEX_SIZE * SQRT3 * (r + 0.5 * (q & 1))
-	var elev: float = _get_hex_elevation(q, r)
+	var elev: float = _get_smooth_elevation(q, r)
 	return Vector3(x, elev, z)
 
-## Get hex center world position for entity placement.
 func hex_center(q: int, r: int) -> Vector3:
 	return hex_to_world(q, r)
 
@@ -81,43 +82,89 @@ func update_entities() -> void:
 	_update_npcs()
 	_update_buildings()
 
-# ─── Hex elevation ───────────────────────────────────────────────────
-func _get_hex_elevation(q: int, r: int) -> float:
-	if _state == null:
-		return 0.0
-	var biome: int = clampi(_state.tile_biome(q, r), 0, BIOME_BASE_ELEV.size() - 1)
-	var raw_elev: int = _state.tile_elevation(q, r)
-	return BIOME_BASE_ELEV[biome] + float(raw_elev) * ELEV_SCALE
+# ─── Smooth elevation ────────────────────────────────────────────────
+func _precompute_smooth_elevation() -> void:
+	# First pass: raw elevation per tile
+	var raw := PackedFloat32Array()
+	raw.resize(_dims.x * _dims.y)
+	for r in _dims.y:
+		for q in _dims.x:
+			var biome: int = clampi(_state.tile_biome(q, r), 0, BIOME_BASE_ELEV.size() - 1)
+			var raw_elev: int = _state.tile_elevation(q, r)
+			raw[r * _dims.x + q] = BIOME_BASE_ELEV[biome] + float(raw_elev) * ELEV_SCALE
 
-# ─── Hex vertices (flat-top) ────────────────────────────────────────
-func _hex_corner(center: Vector3, i: int) -> Vector3:
+	# Two-pass Gaussian-like smooth for realistic terrain
+	_smooth_elev = PackedFloat32Array()
+	_smooth_elev.resize(_dims.x * _dims.y)
+	for pass_i in 2:
+		var src: PackedFloat32Array = raw if pass_i == 0 else _smooth_elev.duplicate()
+		for r in _dims.y:
+			for q in _dims.x:
+				var total: float = src[r * _dims.x + q] * 4.0
+				var weight: float = 4.0
+				# Sample 6 hex neighbors
+				var neighbors := _hex_neighbors(q, r)
+				for n in neighbors:
+					if n.x >= 0 and n.x < _dims.x and n.y >= 0 and n.y < _dims.y:
+						total += src[n.y * _dims.x + n.x]
+						weight += 1.0
+				_smooth_elev[r * _dims.x + q] = total / weight
+
+func _hex_neighbors(q: int, r: int) -> Array[Vector2i]:
+	var parity: int = q & 1
+	if parity == 0:
+		return [
+			Vector2i(q+1, r), Vector2i(q+1, r-1),
+			Vector2i(q, r-1), Vector2i(q-1, r-1),
+			Vector2i(q-1, r), Vector2i(q, r+1),
+		]
+	else:
+		return [
+			Vector2i(q+1, r+1), Vector2i(q+1, r),
+			Vector2i(q, r-1), Vector2i(q-1, r),
+			Vector2i(q-1, r+1), Vector2i(q, r+1),
+		]
+
+func _get_smooth_elevation(q: int, r: int) -> float:
+	if q < 0 or r < 0 or q >= _dims.x or r >= _dims.y:
+		return -0.8
+	return _smooth_elev[r * _dims.x + q]
+
+func _hex_corner_smooth(center_q: int, center_r: int, center_pos: Vector3, i: int) -> Vector3:
 	var angle_deg: float = 60.0 * i
 	var angle_rad: float = deg_to_rad(angle_deg)
-	return Vector3(
-		center.x + HEX_SIZE * cos(angle_rad),
-		center.y,
-		center.z + HEX_SIZE * sin(angle_rad)
-	)
+	var corner_x: float = center_pos.x + HEX_SIZE * cos(angle_rad)
+	var corner_z: float = center_pos.z + HEX_SIZE * sin(angle_rad)
+	# Average elevation between center and adjacent hex for smooth edges
+	var adj := _hex_neighbors(center_q, center_r)
+	var corner_y: float = center_pos.y
+	# Blend with the two adjacent hexes that share this corner
+	var n1_idx: int = i % 6
+	var n2_idx: int = (i + 5) % 6
+	if n1_idx < adj.size() and n2_idx < adj.size():
+		var n1: Vector2i = adj[n1_idx]
+		var n2: Vector2i = adj[n2_idx]
+		var e1: float = _get_smooth_elevation(n1.x, n1.y)
+		var e2: float = _get_smooth_elevation(n2.x, n2.y)
+		corner_y = (center_pos.y + e1 + e2) / 3.0
+	return Vector3(corner_x, corner_y, corner_z)
 
 # ─── Terrain mesh generation ────────────────────────────────────────
 func _build_terrain() -> void:
 	print("[HexGrid] Building 3D terrain %d×%d..." % [_dims.x, _dims.y])
 
-	# Load biome textures into an atlas texture or use individual materials
 	var biome_materials: Array[StandardMaterial3D] = []
 	for i in BIOME_TEXTURES.size():
 		var mat := StandardMaterial3D.new()
 		var tex := load(BIOME_TEXTURES[i]) as Texture2D
 		mat.albedo_texture = tex
-		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
 		mat.vertex_color_use_as_albedo = false
-		# No specular for pixel art look
 		mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 		mat.roughness = 1.0
 		biome_materials.append(mat)
 
-	# Group hexes by biome to batch into fewer meshes
 	var biome_verts: Array = []
 	var biome_uvs: Array = []
 	var biome_normals: Array = []
@@ -126,7 +173,6 @@ func _build_terrain() -> void:
 		biome_uvs.append(PackedVector2Array())
 		biome_normals.append(PackedVector3Array())
 
-	# UV coordinates for hex: map hex shape to a square texture
 	var uv_center := Vector2(0.5, 0.5)
 	var uv_corners: Array[Vector2] = []
 	for i in 6:
@@ -139,23 +185,30 @@ func _build_terrain() -> void:
 			var center: Vector3 = hex_to_world(q, r)
 			var corners: Array[Vector3] = []
 			for i in 6:
-				corners.append(_hex_corner(center, i))
+				corners.append(_hex_corner_smooth(q, r, center, i))
 
-			var up := Vector3.UP
-			# 6 triangles: center → corner[i] → corner[i+1]
 			for i in 6:
 				var next: int = (i + 1) % 6
-				biome_verts[biome].append(center)
-				biome_verts[biome].append(corners[i])
-				biome_verts[biome].append(corners[next])
+				var v0: Vector3 = center
+				var v1: Vector3 = corners[i]
+				var v2: Vector3 = corners[next]
+				# Compute proper face normal
+				var edge1: Vector3 = v1 - v0
+				var edge2: Vector3 = v2 - v0
+				var normal: Vector3 = edge1.cross(edge2).normalized()
+				if normal.y < 0:
+					normal = -normal
+
+				biome_verts[biome].append(v0)
+				biome_verts[biome].append(v1)
+				biome_verts[biome].append(v2)
 				biome_uvs[biome].append(uv_center)
 				biome_uvs[biome].append(uv_corners[i])
 				biome_uvs[biome].append(uv_corners[next])
-				biome_normals[biome].append(up)
-				biome_normals[biome].append(up)
-				biome_normals[biome].append(up)
+				biome_normals[biome].append(normal)
+				biome_normals[biome].append(normal)
+				biome_normals[biome].append(normal)
 
-	# Create MeshInstance3D per biome
 	for i in BIOME_TEXTURES.size():
 		var verts: PackedVector3Array = biome_verts[i]
 		if verts.size() == 0:
@@ -175,16 +228,15 @@ func _build_terrain() -> void:
 		mi.name = "Biome_%d" % i
 		add_child(mi)
 
-	# Add water plane for ocean areas
 	_add_water_plane()
 	print("[HexGrid] Terrain built.")
 
 func _add_water_plane() -> void:
 	var water_mat := StandardMaterial3D.new()
-	water_mat.albedo_color = Color(0.15, 0.35, 0.65, 0.7)
+	water_mat.albedo_color = Color(0.12, 0.30, 0.55, 0.75)
 	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	water_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	water_mat.roughness = 0.3
+	water_mat.roughness = 0.2
 	water_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 	var max_x: float = HEX_SIZE * 1.5 * _dims.x + HEX_SIZE
@@ -196,7 +248,7 @@ func _add_water_plane() -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = plane
 	mi.name = "WaterPlane"
-	mi.position = Vector3(max_x * 0.5, -0.15, max_z * 0.5)
+	mi.position = Vector3(max_x * 0.5, -0.2, max_z * 0.5)
 	add_child(mi)
 
 # ─── Entity rendering ───────────────────────────────────────────────
@@ -262,15 +314,19 @@ func _update_buildings() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _building_texture
 			sprite.pixel_size = 0.05
-			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			# Buildings anchored — no billboard, fixed on hex
+			sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+			sprite.axis = Vector3.AXIS_Y
 			_entity_root.add_child(sprite)
 			_building_sprites[bld.id] = sprite
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, pos.y + 0.4, pos.z)
+		# Face south (fixed rotation, not following camera)
+		sprite.rotation_degrees = Vector3(-90, 0, 0)
 
 		var stage: int = bld.stage
 		if stage == 4:

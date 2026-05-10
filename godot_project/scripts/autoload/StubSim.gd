@@ -6,8 +6,8 @@ extends Node
 ## without compiling the Rust backend.
 
 # ── World parameters ─────────────────────────────────────────────────
-const MAP_W := 128
-const MAP_H := 128
+const MAP_W := 256
+const MAP_H := 256
 const TICK_RATE := 6          # ticks per sim-day
 const DAYS_PER_YEAR := 360
 
