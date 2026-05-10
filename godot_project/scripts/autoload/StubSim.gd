@@ -59,7 +59,7 @@ const CIV_WOOD_TARGET := BUILDING_TOTAL_WOOD * 2
 ## How far a chopper will walk for a tree (Manhattan distance, tiles).
 const CHOPPER_RANGE := 18
 
-# ── Territory ──────────────────────────────────────────────────────────────────
+# ── Territory ───────────────────────────────────────────────────────────────────────────
 ## Tiles within this Manhattan distance of any of a civ's buildings are
 ## considered claimed by that civ. Conflicts are resolved by closest
 ## building.
@@ -67,6 +67,13 @@ const TERRITORY_RADIUS := 12
 ## Recompute interval (sim-days). Lower = snappier border updates, more
 ## CPU; 10 days is fine even on a 384² map.
 const TERRITORY_RECOMPUTE_DAYS := 10
+
+# ── Leadership ──────────────────────────────────────────────────────────────────────────
+## Re-election interval. After this many sim-years the oldest living
+## adult is re-evaluated; the same NPC may keep the post if still
+## eldest. Death of the leader triggers an immediate re-election
+## regardless of term length.
+const LEADER_TERM_YEARS := 30
 
 # ── Internal arrays ──────────────────────────────────────────────────
 var _biomes: PackedByteArray
@@ -325,6 +332,8 @@ func _spawn_initial_civs(civ_count: int) -> void:
 			"spawn_x": center.x,
 			"spawn_y": center.y,
 			"stockpile": {"wood": BUILDING_TOTAL_WOOD},
+			"leader_id": -1,
+			"leader_term_started_day": 0,
 		})
 		# Place 2 starter houses
 		for _h in 2:
@@ -374,6 +383,22 @@ func _generate_civ_name(civ_id: int) -> String:
 	# Stable per civ_id + seed so the same world always names civs the same way.
 	var local := RandomNumberGenerator.new()
 	local.seed = _seed_value ^ (civ_id * 0x9E3779B9)
+	var syllables: int = local.randi_range(2, 3)
+	var s := ""
+	for i in syllables:
+		s += CONS[local.randi() % CONS.size()]
+		s += VOW[local.randi() % VOW.size()]
+	return s.capitalize()
+
+## Procedural NPC name, derived deterministically from npc_id + world
+## seed. Used for the leader-portrait label and hover tooltips. Stable
+## for the lifetime of the world: same npc_id always yields the same
+## name. Cheap enough to compute on demand — no per-NPC storage.
+func npc_name(npc_id: int) -> String:
+	const CONS := ["k", "t", "r", "n", "s", "m", "l", "v", "d", "h", "sh"]
+	const VOW := ["a", "e", "i", "o", "u"]
+	var local := RandomNumberGenerator.new()
+	local.seed = _seed_value ^ (npc_id * 0xCC9E2D51)
 	var syllables: int = local.randi_range(2, 3)
 	var s := ""
 	for i in syllables:
@@ -438,11 +463,17 @@ func _tick_daily() -> void:
 	_system_trees()
 	_system_construction()
 	_system_building_request()
+	_system_leadership()
 	if _current_sim_day() % TERRITORY_RECOMPUTE_DAYS == 0:
 		_recompute_territory()
 
 func _current_sim_day() -> int:
 	return _ticks / TICK_RATE
+
+## Public accessor for the absolute sim-day count. Used by the HUD to
+## compute things like \"years in power since leader_term_started_day\".
+func current_sim_day() -> int:
+	return _current_sim_day()
 
 func _npc_age_years(npc: Dictionary) -> int:
 	return npc.age_days / DAYS_PER_YEAR
@@ -908,3 +939,128 @@ func _find_npc(id: int):
 		if npc.id == id:
 			return npc
 	return null
+
+## Public lookup by NPC id. Returns the Dictionary entry from [npcs] or
+## an empty Dictionary if no live NPC has that id. Used by the HUD /
+## hover code to read leader stats without needing to scan the array.
+func find_npc(id: int) -> Dictionary:
+	var npc = _find_npc(id)
+	return npc if npc != null else {}
+
+# ──────────────────────────────────────────────────────────────────────
+# Leadership
+# ──────────────────────────────────────────────────────────────────────
+## Re-evaluate every civ's leader once per sim-day. Selection rule
+## (V0): the oldest living adult of the civ wins. Death of the leader
+## triggers an immediate re-election; otherwise the post is renewed
+## every [LEADER_TERM_YEARS] sim-years.
+##
+## A civ has no leader until it owns at least one COMPLETE building —
+## leadership is a society construct, not a default. Once a civ loses
+## all adults, [civ.leader_id] reverts to -1 and the seat stays empty
+## until a new adult comes of age.
+func _system_leadership() -> void:
+	var today: int = _current_sim_day()
+	var term_days: int = LEADER_TERM_YEARS * DAYS_PER_YEAR
+	for civ in civs:
+		var civ_id: int = int(civ.id)
+		if not _civ_has_completed_building(civ_id):
+			continue
+		var current_id: int = int(civ.leader_id)
+		var current_npc = _find_npc(current_id) if current_id >= 0 else null
+		var leader_alive: bool = current_npc != null and bool(current_npc.alive) and not bool(current_npc.is_child)
+		var term_started: int = int(civ.leader_term_started_day)
+		var term_expired: bool = leader_alive and (today - term_started) >= term_days
+		if leader_alive and not term_expired:
+			continue
+		var best_id: int = _oldest_adult_of_civ(civ_id)
+		if best_id < 0:
+			# No eligible adult: vacate the seat. Will be refilled when a
+			# child grows up or an adult migrates in.
+			if not leader_alive and current_id >= 0:
+				civ.leader_id = -1
+			continue
+		if best_id != current_id:
+			var event_type: String = "leader_chosen" if not leader_alive else "leader_changed"
+			civ.leader_id = best_id
+			civ.leader_term_started_day = today
+			_recent_events.append({
+				"type": event_type,
+				"civ_id": civ_id,
+				"leader_id": best_id,
+				"previous_id": current_id,
+			})
+		elif term_expired:
+			# Same elder still tops the list — simply renew the term.
+			civ.leader_term_started_day = today
+			_recent_events.append({
+				"type": "leader_reelected",
+				"civ_id": civ_id,
+				"leader_id": best_id,
+			})
+
+func _civ_has_completed_building(civ_id: int) -> bool:
+	for b in buildings:
+		if int(b.civ_id) == civ_id and int(b.stage) == BuildStage.COMPLETE:
+			return true
+	return false
+
+func _oldest_adult_of_civ(civ_id: int) -> int:
+	var best_id: int = -1
+	var best_age: int = -1
+	for npc in npcs:
+		if not bool(npc.alive) or bool(npc.is_child):
+			continue
+		if int(npc.civ_id) != civ_id:
+			continue
+		var age_y: int = _npc_age_years(npc)
+		if age_y > best_age:
+			best_age = age_y
+			best_id = int(npc.id)
+	return best_id
+
+## Current leader of [civ_id], or -1 if the seat is empty (or the civ
+## doesn't exist).
+func civ_leader_id(civ_id: int) -> int:
+	if civ_id < 0 or civ_id >= civs.size():
+		return -1
+	return int(civs[civ_id].leader_id)
+
+## Sim-day on which the current leader's term began. Used by the HUD to
+## display “N years in power”. Meaningless when [civ_leader_id] is -1.
+func civ_leader_term_started_day(civ_id: int) -> int:
+	if civ_id < 0 or civ_id >= civs.size():
+		return 0
+	return int(civs[civ_id].leader_term_started_day)
+
+func civ_population(civ_id: int) -> int:
+	var n: int = 0
+	for npc in npcs:
+		if bool(npc.alive) and int(npc.civ_id) == civ_id:
+			n += 1
+	return n
+
+func civ_buildings_count(civ_id: int) -> int:
+	var n: int = 0
+	for b in buildings:
+		if int(b.civ_id) == civ_id and int(b.stage) == BuildStage.COMPLETE:
+			n += 1
+	return n
+
+func civ_territory_tile_count(civ_id: int) -> int:
+	if _tile_owner.is_empty():
+		return 0
+	var n: int = 0
+	for i in _tile_owner.size():
+		if _tile_owner[i] == civ_id:
+			n += 1
+	return n
+
+func total_owned_tile_count() -> int:
+	if _tile_owner.is_empty():
+		return 0
+	var n: int = 0
+	for i in _tile_owner.size():
+		if _tile_owner[i] >= 0:
+			n += 1
+	return n

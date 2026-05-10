@@ -171,3 +171,49 @@ func territory_version() -> int:
 	if _society and _society.has_method("territory_version"):
 		return _society.territory_version()
 	return 0
+
+# ── Leadership pass-throughs ──────────────────────────────────────────
+func civ_leader_id(civ_id: int) -> int:
+	if _society and _society.has_method("civ_leader_id"):
+		return _society.civ_leader_id(civ_id)
+	return -1
+
+func civ_leader_term_started_day(civ_id: int) -> int:
+	if _society and _society.has_method("civ_leader_term_started_day"):
+		return _society.civ_leader_term_started_day(civ_id)
+	return 0
+
+func find_npc(id: int) -> Dictionary:
+	if _society and _society.has_method("find_npc"):
+		return _society.find_npc(id)
+	return {}
+
+func npc_name(id: int) -> String:
+	if _society and _society.has_method("npc_name"):
+		return _society.npc_name(id)
+	return ""
+
+func civ_population(civ_id: int) -> int:
+	if _society and _society.has_method("civ_population"):
+		return _society.civ_population(civ_id)
+	return 0
+
+func civ_buildings_count(civ_id: int) -> int:
+	if _society and _society.has_method("civ_buildings_count"):
+		return _society.civ_buildings_count(civ_id)
+	return 0
+
+func civ_territory_tile_count(civ_id: int) -> int:
+	if _society and _society.has_method("civ_territory_tile_count"):
+		return _society.civ_territory_tile_count(civ_id)
+	return 0
+
+func total_owned_tile_count() -> int:
+	if _society and _society.has_method("total_owned_tile_count"):
+		return _society.total_owned_tile_count()
+	return 0
+
+func current_sim_day() -> int:
+	if _society and _society.has_method("current_sim_day"):
+		return _society.current_sim_day()
+	return 0
