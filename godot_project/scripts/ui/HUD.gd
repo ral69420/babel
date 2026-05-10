@@ -1,29 +1,14 @@
 extends CanvasLayer
-## On-screen UI shell.
-##
-## Layout:
-##   ┌──────────────────────────────────────────────────────────────────────┐
-##   │  Year XXX · Spring · Era      [⏸ ▶︎ ⏩ ⏭]            zoom 2.0× 64,128 │  ← TopBar
-##   │                                                                      │
-##   │                                                                      │
-##   │                                                                      │
-##   │  Biome legend                                  Hover:  Plains / hill │  ← bottom
-##   └──────────────────────────────────────────────────────────────────────┘
-##
-## All labels read directly from the [GameState] autoload via the `_state`
-## handle bound at startup, so the HUD has no game logic of its own.
+## On-screen UI shell — 3D hex world version.
 
 const SEASON_NAMES := ["Spring", "Summer", "Autumn", "Winter"]
 const SEASON_COLORS := [
-	Color8(180, 198, 130, 255),  # Spring — fresh olive
-	Color8(214, 188, 110, 255),  # Summer — warm amber
-	Color8(190, 138, 96,  255),  # Autumn — copper
-	Color8(180, 196, 210, 255),  # Winter — cold pewter
+	Color8(180, 198, 130, 255),
+	Color8(214, 188, 110, 255),
+	Color8(190, 138, 96,  255),
+	Color8(180, 196, 210, 255),
 ]
 const BIOME_NAMES := ["Ocean", "Coast", "Plains", "Forest", "Hills", "Mountain", "Desert", "Tundra"]
-
-const TILE_TAG_RUIN  := 0x01
-const TILE_TAG_RIVER := 0x04
 
 @onready var era_label: Label = $TopBar/Bar/Left/Era
 @onready var year_label: Label = $TopBar/Bar/Left/YearSeason
@@ -36,18 +21,18 @@ const TILE_TAG_RIVER := 0x04
 @onready var legend_box: HBoxContainer = $BottomBar/Legend
 
 var _state: Node = null
-var _world_view: Node2D = null
-var _camera: Camera2D = null
+var _hex_grid: Node3D = null
+var _orbit_cam: Node3D = null
 var _current_scale: int = 1
 
 func _ready() -> void:
 	_wire_speed_buttons()
 	_build_legend()
 
-func bind(state: Node, world_view: Node2D, camera: Camera2D) -> void:
+func bind(state: Node, hex_grid: Node3D, orbit_cam: Node3D) -> void:
 	_state = state
-	_world_view = world_view
-	_camera = camera
+	_hex_grid = hex_grid
+	_orbit_cam = orbit_cam
 	refresh()
 
 func refresh() -> void:
@@ -62,46 +47,14 @@ func refresh() -> void:
 	var hour: int = _state.hour()
 	year_label.text = "Year %d  ·  %s  ·  %02d:00" % [year, SEASON_NAMES[season_idx], hour]
 	year_label.add_theme_color_override("font_color", SEASON_COLORS[season_idx])
-	# Show NPC/building stats alongside era
-	var npc_count := 0
-	var bld_count := 0
-	if _state.has_method("get_npcs"):
-		var npc_list: Array = _state.get_npcs()
-		for n in npc_list:
-			if n.alive:
-				npc_count += 1
-	if _state.has_method("get_buildings"):
-		bld_count = _state.get_buildings().size()
+
+	var npc_count: int = _state.get_npcs().size()
+	var bld_count: int = _state.get_buildings().size()
 	era_label.text = "%s  ·  %d pop  ·  %d bld" % [_era_for_year(year), npc_count, bld_count]
-	_refresh_coords_label()
-	_refresh_hover_label()
 
-func _refresh_coords_label() -> void:
-	if _camera == null:
-		coords_label.text = ""
-		return
-	coords_label.text = "zoom %.1f×" % _camera.zoom.x
-
-func _refresh_hover_label() -> void:
-	if _world_view == null or _camera == null:
-		hover_label.text = ""
-		return
-	var screen_pos := _camera.get_viewport().get_mouse_position()
-	var world_pos: Vector2 = _camera.get_world_pos(screen_pos)
-	var t: Vector2i = _world_view.world_to_tile(world_pos)
-	if t.x < 0:
-		hover_label.text = "—"
-		return
-	var b: int = _state.tile_biome(t.x, t.y)
-	var elev: int = _state.tile_elevation(t.x, t.y)
-	var tags: int = _state.tile_tags(t.x, t.y)
-	var name: String = BIOME_NAMES[b] if b >= 0 and b < BIOME_NAMES.size() else "?"
-	var extra: String = ""
-	if (tags & TILE_TAG_RIVER) != 0:
-		extra = " · river"
-	elif (tags & TILE_TAG_RUIN) != 0:
-		extra = " · ruin"
-	hover_label.text = "(%d, %d)  %s  elev %d%s" % [t.x, t.y, name, elev, extra]
+	if _orbit_cam:
+		coords_label.text = "zoom %.0f" % _orbit_cam.get_zoom_level()
+	hover_label.text = ""
 
 func _wire_speed_buttons() -> void:
 	pause_btn.pressed.connect(func() -> void: _set_scale(0))
@@ -124,7 +77,6 @@ func _update_button_state() -> void:
 	very_fast_btn.button_pressed = (_current_scale == 16)
 
 func _build_legend() -> void:
-	# Match WorldView.BIOME_COLORS so the legend stays accurate.
 	var swatches := [
 		[Color8(28, 46, 76),    "Ocean"],
 		[Color8(64, 102, 132),  "Coast"],
@@ -149,7 +101,6 @@ func _build_legend() -> void:
 		legend_box.add_child(hb)
 
 func _era_for_year(year: int) -> String:
-	# Deterministic era bands. Tweak alongside the chronicle templates.
 	if year < 50:
 		return "Era: Pre-classical"
 	if year < 200:
