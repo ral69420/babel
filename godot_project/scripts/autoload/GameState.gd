@@ -15,12 +15,15 @@ func _ready() -> void:
 	_init_sim()
 
 func _init_sim() -> void:
-	if ClassDB.class_exists("BabelSim"):
+	# Use StubSim for the society loop demo — it has NPC/building logic.
+	# BabelSim (Rust) doesn't expose society loop yet.
+	var use_stub := true
+	if ClassDB.class_exists("BabelSim") and not use_stub:
 		sim = ClassDB.instantiate("BabelSim")
 		sim_ready = true
 		print("[GameState] BabelSim extension loaded.")
 	else:
-		push_warning("[GameState] BabelSim not found — using StubSim.")
+		print("[GameState] Using StubSim for society loop demo.")
 		var StubSimScript := preload("res://scripts/autoload/StubSim.gd")
 		_stub = StubSimScript.new()
 		add_child(_stub)

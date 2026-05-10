@@ -52,6 +52,7 @@ func start(seed_val: int, _w: int, _h: int) -> bool:
 	_tags.resize(MAP_W * MAP_H)
 	_generate_world()
 	_spawn_initial_civs()
+	print("[StubSim] World started. NPCs: %d, Buildings: %d" % [npcs.size(), buildings.size()])
 	return true
 
 func dims() -> Vector2i:
@@ -304,7 +305,7 @@ func _system_aging() -> void:
 				_recent_events.append({"type": "death", "id": npc.id, "age": age_y})
 				# Free partner
 				if npc.partner_id >= 0:
-					var partner := _find_npc(npc.partner_id)
+					var partner = _find_npc(npc.partner_id)
 					if partner != null:
 						partner.partner_id = -1
 
@@ -316,9 +317,9 @@ func _system_movement() -> void:
 		if npc.move_timer <= 0:
 			npc.move_timer = _rng.randi_range(2, 8)
 			# Pick new target within radius
-			var radius := 3 if npc.is_child else 5
-			var tx := npc.x + _rng.randi_range(-radius, radius)
-			var ty := npc.y + _rng.randi_range(-radius, radius)
+			var radius: int = 3 if npc.is_child else 5
+			var tx: int = int(npc.x) + _rng.randi_range(-radius, radius)
+			var ty: int = int(npc.y) + _rng.randi_range(-radius, radius)
 			tx = clampi(tx, 1, MAP_W - 2)
 			ty = clampi(ty, 1, MAP_H - 2)
 			if _is_walkable(tx, ty):
@@ -326,10 +327,10 @@ func _system_movement() -> void:
 				npc.target_y = ty
 		# Move toward target
 		if npc.x != npc.target_x or npc.y != npc.target_y:
-			var dx := signi(npc.target_x - npc.x)
-			var dy := signi(npc.target_y - npc.y)
-			var new_x := npc.x + dx
-			var new_y := npc.y + dy
+			var dx: int = signi(int(npc.target_x) - int(npc.x))
+			var dy: int = signi(int(npc.target_y) - int(npc.y))
+			var new_x: int = int(npc.x) + dx
+			var new_y: int = int(npc.y) + dy
 			if _is_walkable(new_x, new_y):
 				npc.x = new_x
 				npc.y = new_y
@@ -340,7 +341,7 @@ func _system_pairing() -> void:
 			continue
 		if npc.partner_id >= 0:
 			continue
-		var age_y := _npc_age_years(npc)
+		var age_y: int = _npc_age_years(npc)
 		if age_y < 14 or age_y > 50:
 			continue
 		# Search radius 6 for another single adult of same civ
@@ -349,10 +350,10 @@ func _system_pairing() -> void:
 				continue
 			if other.partner_id >= 0 or other.civ_id != npc.civ_id:
 				continue
-			var other_age := _npc_age_years(other)
+			var other_age: int = _npc_age_years(other)
 			if other_age < 14 or other_age > 50:
 				continue
-			var dist := abs(npc.x - other.x) + abs(npc.y - other.y)
+			var dist: int = absi(int(npc.x) - int(other.x)) + absi(int(npc.y) - int(other.y))
 			if dist <= 6:
 				if _rng.randf() < 0.10:
 					npc.partner_id = other.id
@@ -369,7 +370,7 @@ func _system_gestation() -> void:
 	for npc in npcs:
 		if not npc.alive or npc.partner_id < 0:
 			continue
-		var partner := _find_npc(npc.partner_id)
+		var partner = _find_npc(npc.partner_id)
 		if partner == null or not partner.alive:
 			continue
 		# Start gestation
@@ -380,7 +381,7 @@ func _system_gestation() -> void:
 			var day := _current_sim_day()
 			if day - npc.last_birth_day < 2 * DAYS_PER_YEAR:
 				continue
-			var dist := abs(npc.x - partner.x) + abs(npc.y - partner.y)
+			var dist: int = absi(int(npc.x) - int(partner.x)) + absi(int(npc.y) - int(partner.y))
 			if dist > 6:
 				continue
 			if _rng.randf() < 0.05:
@@ -393,7 +394,7 @@ func _system_gestation() -> void:
 				npc.gestation_days = -1
 				npc.last_birth_day = _current_sim_day()
 				var child_id := _spawn_npc(npc.x, npc.y, npc.civ_id, 0)
-				var child := _find_npc(child_id)
+				var child = _find_npc(child_id)
 				if child != null:
 					child.home_id = npc.home_id
 				_recent_events.append({
@@ -410,7 +411,7 @@ func _system_construction() -> void:
 			continue
 		var builder_count := 0
 		for bid in b.builder_ids:
-			var builder := _find_npc(bid)
+			var builder = _find_npc(bid)
 			if builder != null and builder.alive:
 				builder_count += 1
 		if builder_count == 0:
@@ -434,20 +435,20 @@ func _system_building_request() -> void:
 	for npc in npcs:
 		if not npc.alive or npc.partner_id < 0 or npc.home_id >= 0:
 			continue
-		var partner := _find_npc(npc.partner_id)
+		var partner = _find_npc(npc.partner_id)
 		if partner == null or not partner.alive:
 			continue
 		if partner.home_id >= 0:
 			continue
 		# Find build location
-		var cx := (npc.x + partner.x) / 2
-		var cy := (npc.y + partner.y) / 2
-		var best_x := -1
-		var best_y := -1
-		var best_dist := 999
+		var cx: int = int(npc.x + partner.x) / 2
+		var cy: int = int(npc.y + partner.y) / 2
+		var best_x: int = -1
+		var best_y: int = -1
+		var best_dist: int = 999
 		for _attempt in 8:
-			var tx := cx + _rng.randi_range(-12, 12)
-			var ty := cy + _rng.randi_range(-12, 12)
+			var tx: int = cx + _rng.randi_range(-12, 12)
+			var ty: int = cy + _rng.randi_range(-12, 12)
 			tx = clampi(tx, 2, MAP_W - 3)
 			ty = clampi(ty, 2, MAP_H - 3)
 			if not _is_walkable(tx, ty):
@@ -462,7 +463,7 @@ func _system_building_request() -> void:
 					break
 			if too_close:
 				continue
-			var d := abs(tx - cx) + abs(ty - cy)
+			var d: int = absi(tx - cx) + absi(ty - cy)
 			if d < best_dist:
 				best_dist = d
 				best_x = tx
@@ -475,8 +476,8 @@ func _system_building_request() -> void:
 			buildings[buildings.size() - 1].builder_ids = [npc.id, partner.id]
 			buildings[buildings.size() - 1].owner_pair = [npc.id, partner.id]
 
-func _find_npc(id: int) -> Dictionary:
+func _find_npc(id: int):
 	for npc in npcs:
 		if npc.id == id:
 			return npc
-	return {}
+	return null
