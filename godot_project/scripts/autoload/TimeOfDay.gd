@@ -150,8 +150,23 @@ func _apply_sky_lerp(env: Environment, a: Dictionary, b: Dictionary, t: float) -
 	sky_mat.ground_bottom_color = (a["ground_bottom"] as Color).lerp(b["ground_bottom"], t)
 
 ## Camera-distance-driven aerial perspective: when zoomed out the world
-## fades into haze on the horizon. Up close the fog disappears so you
-## can read tile-level detail. Density curves are mild on purpose.
+## fades into a thin atmospheric haze that sits *above* the terrain,
+## never on top of it. Up close the fog disappears entirely so you can
+## read tile-level detail.
+##
+## Two layers:
+## - very mild depth fog so distant tiles soften into the sky
+## - height fog with a NEGATIVE density above the terrain so the haze
+##   accumulates in the sky band, not on the ground
+const _FOG_BASE_HEIGHT_M: float = 2.5      ## Just above the highest terrain peaks.
+## Negative on purpose: in Godot 4, negative fog_height_density makes
+## fog density increase *above* fog_height (high-altitude haze) instead
+## of below (ground fog).
+const _FOG_HEIGHT_DENSITY_MAX: float = -0.06
+const _FOG_DEPTH_DENSITY_MAX: float = 0.010
+const _FOG_ZOOM_START: float = 60.0        ## Distance where fog begins to appear.
+const _FOG_ZOOM_FULL: float = 220.0        ## Distance at which fog reaches max.
+
 func _apply_camera_distance_fog(env: Environment) -> void:
 	if _camera_node == null:
 		env.fog_enabled = false
@@ -161,10 +176,15 @@ func _apply_camera_distance_fog(env: Environment) -> void:
 	var dist: float = 40.0
 	if _camera_node.has_method("get_zoom_level"):
 		dist = float(_camera_node.call("get_zoom_level"))
-	# Map distance [10..200] → fog density [0..0.04].
-	var t: float = clamp((dist - 10.0) / 190.0, 0.0, 1.0)
+	var t: float = clamp(
+		(dist - _FOG_ZOOM_START) / (_FOG_ZOOM_FULL - _FOG_ZOOM_START),
+		0.0,
+		1.0,
+	)
 	env.fog_enabled = true
-	env.fog_density = lerpf(0.0, 0.045, t)
+	env.fog_density = lerpf(0.0, _FOG_DEPTH_DENSITY_MAX, t)
+	env.fog_height = _FOG_BASE_HEIGHT_M
+	env.fog_height_density = lerpf(0.0, _FOG_HEIGHT_DENSITY_MAX, t)
 
 # ─── Public API ──────────────────────────────────────────────────────
 func bind_world(env: WorldEnvironment, sun: DirectionalLight3D, fill: DirectionalLight3D, camera: Node3D) -> void:

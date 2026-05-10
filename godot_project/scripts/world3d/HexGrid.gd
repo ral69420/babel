@@ -17,7 +17,6 @@ const ELEV_SCALE := 0.025       ## More pronounced elevation.
 const HOUSE_TEX_H := 64.0
 const TREE_TEX_H := 64.0
 const NPC_TEX_FRAME_H := 48.0
-const GRASS_TEX_H := 128.0
 const GROUND_BIAS := 0.02       ## Tiny lift to avoid z-fighting with terrain.
 
 ## Visual scale for entities. Heights are world units (~1.0 = a hex radius).
@@ -52,13 +51,6 @@ const BIOME_BASE_ELEV := [
 	0.0,    # (legacy Tundra slot) → plains elevation
 ]
 
-## Decoration density per biome (used by the grass MultiMesh).
-const GRASS_DENSITY_PER_BIOME := {
-	2: 4,   # Plains  — ~4 tufts/tile
-	3: 5,   # Forest  — ~5 tufts/tile (forest floor)
-	4: 2,   # Hills   — ~2 tufts/tile
-}
-
 ## Fallback civ colour palette used when [GameState.get_civs] is empty
 ## (e.g. running directly from Main.tscn without going through the menu).
 ## Must contain at least as many entries as the new-game civ-count slider
@@ -86,11 +78,12 @@ var _leader_markers: Dictionary = {}
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
 var _tree_texture: Texture2D
+## Kept around as a stand-in texture for the falling-leaves particle
+## system. The grass MultiMesh decoration was removed, but the leaf
+## sprite happens to read fine as a small green flake.
 var _grass_texture: Texture2D
 var _vegetation_shader: Shader
 var _tree_wind_material: ShaderMaterial
-var _grass_wind_material: ShaderMaterial
-var _grass_multimesh: MultiMeshInstance3D
 var _leaves_particles: GPUParticles3D
 var _smooth_elev: PackedFloat32Array
 
@@ -109,7 +102,6 @@ func _ready() -> void:
 	_grass_texture = load("res://assets/decorations/grass/grass.png") as Texture2D
 	_vegetation_shader = load("res://shaders/vegetation_wind.gdshader") as Shader
 	_tree_wind_material = _make_wind_material(_tree_texture, 0.04, 0.7, 0.4)
-	_grass_wind_material = _make_wind_material(_grass_texture, 0.02, 1.4, 1.1)
 	_entity_root = Node3D.new()
 	_entity_root.name = "Entities"
 	add_child(_entity_root)
@@ -143,7 +135,6 @@ func bind(state: Node) -> void:
 		return
 	_precompute_smooth_elevation()
 	_build_terrain()
-	_build_grass_multimesh()
 	_spawn_leaves_particles()
 	_spawn_fireflies_particles()
 
@@ -651,144 +642,6 @@ func _update_buildings() -> void:
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, _ground_anchor_y(pos.y, HOUSE_TEX_H, sprite.pixel_size), pos.z)
-
-
-# ─── Grass decoration (mega-optimised cross-billboard MultiMesh) ─────
-#
-# One MultiMeshInstance3D for the entire map: the per-instance "mesh"
-# is itself a CROSS of two perpendicular quads (so each grass tuft
-# looks 3-D from any orbit angle), and we bake all transforms once
-# during world load. After bake the GPU just instances + applies the
-# shared vegetation_wind shader — no per-frame script work, one draw
-# call regardless of tuft count.
-const GRASS_PIXEL := 0.005
-const GRASS_QUAD_HALF_W := 0.32   ## Half-width of each cross quad (world units).
-const GRASS_QUAD_HEIGHT := 0.64   ## Height of each cross quad (world units).
-const GRASS_TILE_OFFSET_RADIUS := 0.55
-
-## Build the X-shape (two perpendicular quads in one ArrayMesh) used as
-## the per-instance mesh of the grass MultiMesh.
-func _build_grass_cross_mesh() -> ArrayMesh:
-	var verts := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	var normals := PackedVector3Array()
-	var indices := PackedInt32Array()
-
-	var hw := GRASS_QUAD_HALF_W
-	var h := GRASS_QUAD_HEIGHT
-
-	# Two perpendicular quads (XY-plane and ZY-plane), both anchored at
-	# y = 0 (root) growing up to y = h (top).
-	var quad_axes: Array[Vector3] = [Vector3(1, 0, 0), Vector3(0, 0, 1)]
-	for axis in quad_axes:
-		var base_idx := verts.size()
-		verts.append(Vector3(-hw * axis.x, 0.0, -hw * axis.z))
-		verts.append(Vector3( hw * axis.x, 0.0,  hw * axis.z))
-		verts.append(Vector3( hw * axis.x, h,    hw * axis.z))
-		verts.append(Vector3(-hw * axis.x, h,   -hw * axis.z))
-		# UV: V grows top→bottom of the texture (top of plant = V 0).
-		uvs.append(Vector2(0.0, 1.0))
-		uvs.append(Vector2(1.0, 1.0))
-		uvs.append(Vector2(1.0, 0.0))
-		uvs.append(Vector2(0.0, 0.0))
-		# Normals point along the quad axis (so it shades like a
-		# vertical card facing the perpendicular direction).
-		var n := Vector3(axis.z, 0.0, axis.x)   # 90° rotation in XZ
-		for _i in 4:
-			normals.append(n)
-		indices.append(base_idx + 0)
-		indices.append(base_idx + 1)
-		indices.append(base_idx + 2)
-		indices.append(base_idx + 0)
-		indices.append(base_idx + 2)
-		indices.append(base_idx + 3)
-
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_INDEX] = indices
-
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return mesh
-
-## Deterministic per-tile pseudo-random in [0, 1).
-func _grass_hash(seed_a: int, seed_b: int, salt: int) -> float:
-	var h: int = (seed_a * 73856093) ^ (seed_b * 19349663) ^ (salt * 83492791)
-	# Fold to [0, 1).
-	return fposmod(float(h) * 0.0001, 1.0)
-
-func _build_grass_multimesh() -> void:
-	if _grass_texture == null or _grass_wind_material == null:
-		return
-
-	# 1. Count instances first — biome-driven density.
-	var instance_count: int = 0
-	for r in _dims.y:
-		for q in _dims.x:
-			var biome: int = int(_state.tile_biome(q, r))
-			if GRASS_DENSITY_PER_BIOME.has(biome):
-				instance_count += int(GRASS_DENSITY_PER_BIOME[biome])
-	if instance_count <= 0:
-		print("[HexGrid] No grass instances to bake.")
-		return
-
-	# 2. Build the per-instance cross mesh + wire up the shared shader.
-	var cross := _build_grass_cross_mesh()
-	cross.surface_set_material(0, _grass_wind_material)
-
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.mesh = cross
-	mm.instance_count = instance_count
-
-	# 3. Bake transforms (and a subtle per-tuft tint).
-	var idx: int = 0
-	var base_tint := Color(1.0, 1.0, 1.0, 1.0)
-	for r in _dims.y:
-		for q in _dims.x:
-			var biome: int = int(_state.tile_biome(q, r))
-			if not GRASS_DENSITY_PER_BIOME.has(biome):
-				continue
-			var density: int = int(GRASS_DENSITY_PER_BIOME[biome])
-			var center: Vector3 = hex_to_world(q, r)
-			for k in density:
-				var rx: float = (_grass_hash(q, r, k * 2 + 0) - 0.5) \
-					* GRASS_TILE_OFFSET_RADIUS * 2.0
-				var rz: float = (_grass_hash(q, r, k * 2 + 1) - 0.5) \
-					* GRASS_TILE_OFFSET_RADIUS * 2.0
-				var yaw: float = _grass_hash(q, r, k + 311) * TAU
-				var s: float = 0.7 + _grass_hash(q, r, k + 53) * 0.6  # 0.7..1.3
-				var t := Transform3D()
-				t.basis = Basis(Vector3.UP, yaw).scaled(Vector3(s, s, s))
-				t.origin = Vector3(
-					center.x + rx,
-					center.y + GROUND_BIAS,
-					center.z + rz,
-				)
-				mm.set_instance_transform(idx, t)
-				# Slight per-tuft hue jitter so the field isn't flat.
-				var tint_v: float = 0.85 + _grass_hash(q, r, k + 97) * 0.30
-				mm.set_instance_color(
-					idx,
-					base_tint * Color(tint_v, tint_v, tint_v, 1.0),
-				)
-				idx += 1
-
-	# 4. Drop into the scene tree under a dedicated node so
-	#    Phase 5's auto-camera and any future culling layer can find
-	#    it by name.
-	var prev: Node = get_node_or_null("GrassMultiMesh")
-	if prev:
-		prev.queue_free()
-	_grass_multimesh = MultiMeshInstance3D.new()
-	_grass_multimesh.name = "GrassMultiMesh"
-	_grass_multimesh.multimesh = mm
-	add_child(_grass_multimesh)
-	print("[HexGrid] Grass MultiMesh: %d cross-billboard tufts, 1 draw call." % instance_count)
 
 
 # ─── Falling leaves (single global GPUParticles3D) ───────────────────
