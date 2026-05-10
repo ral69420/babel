@@ -60,6 +60,11 @@ var _entity_root: Node3D
 var _npc_sprites: Dictionary = {}
 var _building_sprites: Dictionary = {}
 var _tree_sprites: Dictionary = {}   # tree_id (int) → Node3D
+## civ_id (int) → Label3D currently parented to that civ's leader sprite.
+## Cleared / re-attached lazily in [_update_leader_markers] so the marker
+## follows the leader even after re-elections, and disappears when the
+## seat is empty.
+var _leader_markers: Dictionary = {}
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
 var _tree_texture: Texture2D
@@ -112,7 +117,35 @@ func update_entities() -> void:
 	_update_npcs()
 	_update_buildings()
 	_update_trees()
+	_update_leader_markers()
 	_maybe_rebuild_territory()
+
+## Project a screen-space point onto the world ground plane (y = 0) and
+## convert the hit to offset hex coords. Returns Vector2i(-1, -1) if the
+## ray misses the world or lands off-map.
+##
+## Used by the HUD to render the “hovered tile” tooltip. We deliberately
+## intersect a flat plane instead of the smoothed terrain mesh so the
+## query is constant-time and doesn't require collision shapes per tile;
+## tile centres sit close enough to y = 0 that this is accurate enough
+## for tooltip purposes.
+func screen_to_tile(mouse_pos: Vector2, camera: Camera3D) -> Vector2i:
+	if camera == null or _dims.x <= 0 or _dims.y <= 0:
+		return Vector2i(-1, -1)
+	var origin: Vector3 = camera.project_ray_origin(mouse_pos)
+	var dir: Vector3 = camera.project_ray_normal(mouse_pos)
+	if absf(dir.y) < 0.0001:
+		return Vector2i(-1, -1)
+	var t: float = -origin.y / dir.y
+	if t <= 0.0:
+		return Vector2i(-1, -1)
+	var hit: Vector3 = origin + dir * t
+	var q: int = int(round(hit.x / (HEX_SIZE * 1.5)))
+	var z_off: float = 0.5 * float(q & 1)
+	var r: int = int(round(hit.z / (HEX_SIZE * SQRT3) - z_off))
+	if q < 0 or r < 0 or q >= _dims.x or r >= _dims.y:
+		return Vector2i(-1, -1)
+	return Vector2i(q, r)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -414,6 +447,46 @@ func _update_trees() -> void:
 			n.queue_free()
 		_tree_sprites.erase(key)
 
+# ─── Leader markers ─────────────────────────────────────────────────
+const LEADER_STAR_COLOR := Color(1.0, 0.92, 0.55)
+const LEADER_STAR_OUTLINE := Color(0.05, 0.05, 0.10)
+const LEADER_STAR_FONT_SIZE := 32
+
+func _make_leader_marker() -> Label3D:
+	var l := Label3D.new()
+	l.text = "★"
+	l.font_size = LEADER_STAR_FONT_SIZE
+	l.outline_size = 6
+	l.modulate = LEADER_STAR_COLOR
+	l.outline_modulate = LEADER_STAR_OUTLINE
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.pixel_size = 0.005
+	# Hover above the sprite head; npc Sprite3D pixel_size ≈0.021 with a
+	# 48-px-tall texture means the top edge is ~0.5 above the sprite
+	# centre. Lift another 0.18 so the star isn't kissing the hat.
+	l.position = Vector3(0.0, 0.62, 0.0)
+	return l
+
+func _update_leader_markers() -> void:
+	var civs_arr: Array = _state.get_civs()
+	for civ in civs_arr:
+		var civ_id: int = int(civ.id)
+		var leader_id: int = int(civ.leader_id) if civ.has("leader_id") else -1
+		var marker: Node = _leader_markers.get(civ_id, null)
+		var sprite: Node = _npc_sprites.get(leader_id, null) if leader_id >= 0 else null
+		if sprite == null:
+			if marker != null and is_instance_valid(marker):
+				marker.queue_free()
+			_leader_markers.erase(civ_id)
+			continue
+		if marker == null or not is_instance_valid(marker) or marker.get_parent() != sprite:
+			if marker != null and is_instance_valid(marker):
+				marker.queue_free()
+			marker = _make_leader_marker()
+			sprite.add_child(marker)
+			_leader_markers[civ_id] = marker
+
 # ─── Entity rendering ───────────────────────────────────────────────
 func _update_npcs() -> void:
 	var npc_list: Array = _state.get_npcs()
@@ -422,6 +495,11 @@ func _update_npcs() -> void:
 	for npc in npc_list:
 		if not npc.alive:
 			if _npc_sprites.has(npc.id):
+				var dying_sprite: Node = _npc_sprites[npc.id]
+				for civ_id_key in _leader_markers.keys():
+					var marker: Node = _leader_markers[civ_id_key]
+					if is_instance_valid(marker) and marker.get_parent() == dying_sprite:
+						_leader_markers.erase(civ_id_key)
 				_npc_sprites[npc.id].queue_free()
 				_npc_sprites.erase(npc.id)
 			continue
@@ -461,6 +539,14 @@ func _update_npcs() -> void:
 		if not active_ids.has(npc_id):
 			to_remove.append(npc_id)
 	for npc_id in to_remove:
+		# A leader marker is parented to the sprite about to be freed —
+		# drop the dictionary entry so we don't dereference it next frame
+		# (Godot will free the child along with the parent).
+		var dying_sprite: Node = _npc_sprites[npc_id]
+		for civ_id_key in _leader_markers.keys():
+			var marker: Node = _leader_markers[civ_id_key]
+			if is_instance_valid(marker) and marker.get_parent() == dying_sprite:
+				_leader_markers.erase(civ_id_key)
 		_npc_sprites[npc_id].queue_free()
 		_npc_sprites.erase(npc_id)
 
