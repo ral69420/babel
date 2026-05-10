@@ -92,17 +92,22 @@ theme_override_constants/separation = 8
 [node name="Small" type="Button" parent="Panel/Margin/Form/SizeRow/SizeButtons"]
 custom_minimum_size = Vector2(100, 32)
 layout_mode = 2
-text = "Small (128)"
+text = "Small (256)"
 
 [node name="Medium" type="Button" parent="Panel/Margin/Form/SizeRow/SizeButtons"]
-custom_minimum_size = Vector2(120, 32)
+custom_minimum_size = Vector2(110, 32)
 layout_mode = 2
-text = "Medium (256)"
+text = "Medium (512)"
 
 [node name="Large" type="Button" parent="Panel/Margin/Form/SizeRow/SizeButtons"]
 custom_minimum_size = Vector2(110, 32)
 layout_mode = 2
-text = "Large (384)"
+text = "Large (1024)"
+
+[node name="Huge" type="Button" parent="Panel/Margin/Form/SizeRow/SizeButtons"]
+custom_minimum_size = Vector2(110, 32)
+layout_mode = 2
+text = "Huge (2048)"
 
 [node name="CivRow" type="VBoxContainer" parent="Panel/Margin/Form"]
 layout_mode = 2

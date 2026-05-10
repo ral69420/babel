@@ -26,6 +26,9 @@ const ONESHOT_VOLUME_DB := -6.0
 @onready var hex_grid: Node3D = $WorldRoot/HexGrid
 @onready var orbit_cam: Node3D = $WorldRoot/OrbitCamera
 @onready var hud: CanvasLayer = $HUD
+@onready var world_env: WorldEnvironment = $WorldEnvironment
+@onready var sun: DirectionalLight3D = $WorldRoot/Sun
+@onready var fill_light: DirectionalLight3D = $WorldRoot/FillLight
 
 var _audio_2d: AudioStreamPlayer = null
 var _seen_first_chop: bool = false
@@ -39,6 +42,9 @@ func _ready() -> void:
 	if SaveManager:
 		SaveManager.loaded.connect(_on_save_loaded)
 	start_game()
+	# Hand off the lighting rig to the day/night autoload so it can drive
+	# sun rotation/colour, sky, ambient and zoom-out fog every frame.
+	TimeOfDay.bind_world(world_env, sun, fill_light, orbit_cam)
 
 ## Boot the world using the parameters in [RunConfig].
 ##

@@ -420,32 +420,32 @@ func _generate_world() -> void:
 	for y in map_h:
 		for x in map_w:
 			var idx := y * map_w + x
-			# Island shape — fade to ocean at edges
+			# Island shape — softer fade so the playable land takes up more of
+			# the map and the ocean is a thin border instead of half the world.
 			var dx := (float(x) / map_w - 0.5) * 2.0
 			var dy := (float(y) / map_h - 0.5) * 2.0
 			var dist := sqrt(dx * dx + dy * dy)
 			var e := (noise_elev.get_noise_2d(x, y) + 1.0) * 0.5
-			e -= dist * 0.7
+			e -= dist * 0.4
 			e = clampf(e, 0.0, 1.0)
 			_elevation[idx] = int(e * 255.0)
 
-			var temp := (noise_temp.get_noise_2d(x, y) + 1.0) * 0.5
 			var moist := (noise_moist.get_noise_2d(x, y) + 1.0) * 0.5
+			# noise_temp is no longer sampled now that the temperature-driven
+			# biomes (TUNDRA, DESERT) are removed; the seed offset is kept
+			# above so re-introducing temperature later doesn't shift seeds.
 
+			# Six-biome world: OCEAN (thin border), MOUNTAIN, FOREST, HILLS,
+			# PLAINS. COAST/DESERT/TUNDRA enum slots are kept for save-compat
+			# but never produced.
 			var biome: int
-			if e < 0.25:
+			if e < 0.18:
 				biome = Biome.OCEAN
-			elif e < 0.30:
-				biome = Biome.COAST
 			elif e > 0.80:
 				biome = Biome.MOUNTAIN
-			elif temp < 0.25:
-				biome = Biome.TUNDRA
-			elif temp > 0.70 and moist < 0.35:
-				biome = Biome.DESERT
 			elif moist > 0.55:
 				biome = Biome.FOREST
-			elif e > 0.60:
+			elif e > 0.55:
 				biome = Biome.HILLS
 			else:
 				biome = Biome.PLAINS
@@ -456,6 +456,9 @@ func _is_walkable(x: int, y: int) -> bool:
 	if x < 0 or y < 0 or x >= map_w or y >= map_h:
 		return false
 	var b := tile_biome(x, y)
+	# OCEAN and MOUNTAIN are non-walkable; legacy COAST tiles (kept in the
+	# enum for save-compat but never generated) are treated as walkable
+	# plains-equivalents.
 	return b != Biome.OCEAN and b != Biome.MOUNTAIN
 
 func _tile_occupied_by_building(x: int, y: int) -> bool:
