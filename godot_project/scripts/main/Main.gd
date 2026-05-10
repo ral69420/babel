@@ -8,8 +8,8 @@ extends Node3D
 ##   - hand off UI to [HUD]
 
 const DEFAULT_SEED := 0x000B_ABE1
-const DEFAULT_WIDTH := 128
-const DEFAULT_HEIGHT := 128
+const DEFAULT_WIDTH := 256
+const DEFAULT_HEIGHT := 256
 const TICKS_PER_FRAME := 1
 
 @onready var hex_grid: Node3D = $WorldRoot/HexGrid

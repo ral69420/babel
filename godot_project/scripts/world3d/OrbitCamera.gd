@@ -9,7 +9,7 @@ extends Node3D
 ##   Q / E           — rotate left/right
 
 const MIN_DISTANCE := 5.0
-const MAX_DISTANCE := 120.0
+const MAX_DISTANCE := 300.0
 const MIN_PITCH := -85.0
 const MAX_PITCH := -20.0
 const PAN_SPEED := 0.5
@@ -33,7 +33,7 @@ func _ready() -> void:
 		_camera.name = "Camera3D"
 		add_child(_camera)
 	_camera.near = 0.5
-	_camera.far = 500.0
+	_camera.far = 1000.0
 	_camera.fov = 45.0
 	_update_transform()
 

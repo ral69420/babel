@@ -1,9 +1,9 @@
 [gd_scene load_steps=8 format=3 uid="uid://baxbel0002"]
 
-[ext_resource type="Script" path="res://scripts/main/Main.gd" id="1"]
-[ext_resource type="Script" path="res://scripts/world3d/HexGrid.gd" id="2"]
-[ext_resource type="Script" path="res://scripts/ui/HUD.gd" id="3"]
-[ext_resource type="Script" path="res://scripts/world3d/OrbitCamera.gd" id="4"]
+[ext_resource type="Script" uid="uid://1dsbkxmuucgv" path="res://scripts/main/Main.gd" id="1"]
+[ext_resource type="Script" uid="uid://mboq2vkl5knv" path="res://scripts/world3d/HexGrid.gd" id="2"]
+[ext_resource type="Script" uid="uid://bb185m2fad4e3" path="res://scripts/ui/HUD.gd" id="3"]
+[ext_resource type="Script" uid="uid://bnrx7rp4ciuy0" path="res://scripts/world3d/OrbitCamera.gd" id="4"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
 sky_top_color = Color(0.45, 0.6, 0.85, 1)
@@ -39,12 +39,12 @@ script = ExtResource("4")
 [node name="Camera3D" type="Camera3D" parent="WorldRoot/OrbitCamera"]
 
 [node name="Sun" type="DirectionalLight3D" parent="WorldRoot"]
-transform = Transform3D(0.866, -0.354, 0.354, 0.0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 50, 0)
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 50, 0)
 light_energy = 1.2
 shadow_enabled = true
 
 [node name="FillLight" type="DirectionalLight3D" parent="WorldRoot"]
-transform = Transform3D(0.866, 0.354, -0.354, 0.0, 0.707, 0.707, 0.5, -0.612, 0.612, 0, 30, 0)
+transform = Transform3D(0.866, 0.354, -0.354, 0, 0.707, 0.707, 0.5, -0.612, 0.612, 0, 30, 0)
 light_color = Color(0.7, 0.8, 1, 1)
 light_energy = 0.4
 
