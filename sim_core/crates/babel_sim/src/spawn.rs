@@ -15,7 +15,8 @@
 
 use crate::det_rng::DetRng;
 use crate::entity::{
-    City, CityId, CityTheme, CivId, Civilization, FactionId, Npc, NpcId, NpcRole, NpcTraits, Sex,
+    BuildingId, City, CityId, CityTheme, CivId, Civilization, FactionId, Npc, NpcId, NpcRole,
+    NpcTraits, Sex,
 };
 use crate::event::EventKind;
 use crate::world::World;
@@ -315,7 +316,21 @@ pub fn found_city(
 pub fn spawn_npcs(world: &mut World, civ: CivId, cx: i32, cy: i32, names: &[String]) -> Vec<NpcId> {
     let tick = world.clock.ticks();
     let mut out = Vec::with_capacity(names.len());
+    // Scatter starting NPCs in a 5×5 grid around the capital so they
+    // don't all overlap on the same tile. Deterministic — driven by
+    // index, not RNG.
+    const SCATTER_R: i32 = 2;
+    let dims = world.dims;
     for (i, name) in names.iter().enumerate() {
+        // Place along a deterministic spiral inside [-2, 2]×[-2, 2].
+        let dx = ((i % 5) as i32) - SCATTER_R;
+        let dy = (((i / 5) % 5) as i32) - SCATTER_R;
+        let mut nx = cx + dx;
+        let mut ny = cy + dy;
+        if dims.idx(nx, ny).is_none() {
+            nx = cx;
+            ny = cy;
+        }
         let role = match i {
             0 => NpcRole::Ruler,
             1 => NpcRole::Chronicler,
@@ -335,11 +350,17 @@ pub fn spawn_npcs(world: &mut World, civ: CivId, cx: i32, cy: i32, names: &[Stri
             health: 80 + (world.rng.gen_range_u32(21) as u8),
             _pad: 0,
         };
+        // Spawn with a varied "starting age" so day-1 doesn't look like a
+        // crèche. We give initial NPCs a mix of late-teens through
+        // early-30s in sim-years (5040..=11880 sim-days). Days_per_year
+        // matches the calendar (`time_sys::DAYS_PER_YEAR`).
+        let starting_age_years = 18 + world.rng.gen_range_u32(15); // 18..=32
+        let age_days = starting_age_years * 360;
         let npc_id = world.npcs.insert(Npc {
             name: name.clone(),
             civ,
-            x: cx,
-            y: cy,
+            x: nx,
+            y: ny,
             birth_tick: tick,
             death_tick: u64::MAX,
             sex,
@@ -349,6 +370,10 @@ pub fn spawn_npcs(world: &mut World, civ: CivId, cx: i32, cy: i32, names: &[Stri
             spouse: NpcId::NONE,
             mother: NpcId::NONE,
             father: NpcId::NONE,
+            age_days,
+            last_birth_day: u32::MAX,
+            gestation_days: u16::MAX,
+            home: BuildingId::NONE,
         });
         world
             .events

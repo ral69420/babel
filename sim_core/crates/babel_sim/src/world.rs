@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::det_rng::DetRng;
-use crate::entity::{Cities, Civilizations, Factions, Npcs};
+use crate::entity::{Buildings, Cities, Civilizations, Factions, Npcs};
 use crate::event::EventLog;
 use crate::tick::TickClock;
 use crate::time_sys::Calendar;
@@ -199,6 +199,9 @@ pub struct World {
     pub npcs: Npcs,
     /// Faction storage (rebel groups, religious orders, guilds).
     pub factions: Factions,
+    /// Placed buildings (granaries, houses…). Each has its own
+    /// construction stage and progress timer.
+    pub buildings: Buildings,
     /// Sim version — bumped on schema-breaking changes; save migrations key off
     /// this.
     pub sim_version: u32,
@@ -222,6 +225,7 @@ impl World {
             cities: Cities::default(),
             npcs: Npcs::default(),
             factions: Factions::default(),
+            buildings: Buildings::default(),
             sim_version: SIM_VERSION,
         })
     }

@@ -189,6 +189,63 @@ impl BabelSim {
         i32::from(self.inner.npc_health(idx.max(0) as u32))
     }
 
+    /// Age in sim-years of the `idx`-th live NPC.
+    #[func]
+    fn npc_age_years(&self, idx: i32) -> i32 {
+        self.inner.npc_age_years(idx.max(0) as u32) as i32
+    }
+
+    /// Age in sim-days of the `idx`-th live NPC.
+    #[func]
+    fn npc_age_days(&self, idx: i32) -> i32 {
+        self.inner.npc_age_days(idx.max(0) as u32) as i32
+    }
+
+    /// Sex (`"M"` / `"F"`) of the `idx`-th live NPC.
+    #[func]
+    fn npc_sex(&self, idx: i32) -> GString {
+        GString::from(self.inner.npc_sex(idx.max(0) as u32))
+    }
+
+    /// Life-state string (`"child"` / `"single"` / `"paired"` /
+    /// `"pregnant"`) for the `idx`-th live NPC.
+    #[func]
+    fn npc_state(&self, idx: i32) -> GString {
+        GString::from(self.inner.npc_state(idx.max(0) as u32))
+    }
+
+    /// Number of placed buildings (any stage).
+    #[func]
+    fn building_count(&self) -> i32 {
+        self.inner.building_count() as i32
+    }
+
+    /// Position of the `idx`-th building.
+    #[func]
+    fn building_pos(&self, idx: i32) -> Vector2i {
+        let (x, y) = self.inner.building_pos(idx.max(0) as u32);
+        Vector2i::new(x, y)
+    }
+
+    /// Construction stage index for the `idx`-th building.
+    /// 0 Foundation, 1 Frame, 2 Walls, 3 Roof, 4 Complete.
+    #[func]
+    fn building_stage(&self, idx: i32) -> i32 {
+        i32::from(self.inner.building_stage(idx.max(0) as u32))
+    }
+
+    /// Build progress 0..=100 for the `idx`-th building.
+    #[func]
+    fn building_progress_pct(&self, idx: i32) -> i32 {
+        self.inner.building_progress_pct(idx.max(0) as u32) as i32
+    }
+
+    /// Kind name (`"Granary"`, …) for the `idx`-th building.
+    #[func]
+    fn building_kind(&self, idx: i32) -> GString {
+        GString::from(self.inner.building_kind(idx.max(0) as u32))
+    }
+
     /// Summon a Strugatsky "Zone" anomaly at `(x, y)`. Returns tiles tagged.
     #[func]
     fn summon_zone(&mut self, x: i32, y: i32) -> i32 {

@@ -38,7 +38,9 @@ pub mod worldgen;
 mod systems;
 
 pub use det_rng::DetRng;
-pub use entity::{CityId, CityTheme, CivId, FactionId, NpcId};
+pub use entity::{
+    BuildingId, BuildingKind, BuildingStage, CityId, CityTheme, CivId, FactionId, NpcId, Sex,
+};
 pub use event::{Event, EventKind, EventLog};
 pub use spawn::{
     found_city, seed_world, spawn_npcs, CivSpec, EventSummary, SeededCiv, SpawnError,
