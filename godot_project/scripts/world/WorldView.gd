@@ -39,13 +39,15 @@ const TILE_PX := 32  ## Image pixels per tile. Matches variant size.
 # alpha. The blend region is small enough that no muddy stripe forms,
 # and the noise breaks the boundary into a ragged single-pixel fringe
 # that perceptually reads as a natural pixel-art edge.
-const BLEND_BAND := 3
-const BLEND_PEAK := 0.35
-const BLEND_GAMMA := 1.8
+const BLEND_BAND := 2
+const BLEND_PEAK := 0.18
+const BLEND_GAMMA := 2.0
 # Per-pixel noise amplitude added to the gradient ramp before alpha is
-# computed. 0 → smooth band; 1 → essentially binary threshold. Higher
-# values give the seam a more "speckled / pixel-art tuft" character.
-const BLEND_NOISE := 0.65
+# computed. 0 → smooth band; 1 → essentially binary threshold. The current
+# very-low PEAK puts the average alpha near zero, so noise is the only
+# thing actually populating the fringe — keeping it moderately high keeps
+# the fringe present at all without ever forming a uniform stripe.
+const BLEND_NOISE := 0.55
 const FRINGE_SEED := 0xB1B1_9001
 
 const BIOME_NAMES := ["ocean", "coast", "plains", "forest",
@@ -80,6 +82,19 @@ var _variants: Dictionary = {}
 # biome_name -> Image (used when variants are missing)
 var _fallback_tiles: Dictionary = {}
 
+# Per-biome decoration scatter table.
+#
+#   _decorations[biome_name] = Array of {"image": Image, "weight": int}
+#
+# Each tile in that biome rolls a deterministic hash; if the hash falls
+# inside the cumulative weight window of any entry the corresponding
+# image is alpha-blitted on top of the tile's variant. Empty array → no
+# decorations on that biome.
+var _decorations: Dictionary = {}
+# Probability that any given plains tile carries *some* decoration.
+const PLAINS_DECO_RATE := 0.06
+const DECO_HASH_SEED := 0xD0_DECA_71
+
 # Pre-baked alpha gradient masks, keyed by direction string. Each mask is
 # TILE_PX×TILE_PX with non-zero alpha only inside the BLEND_BAND-wide band
 # along the matching edge. Alpha varies smoothly with distance from the
@@ -97,6 +112,7 @@ func _ready() -> void:
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_child(_sprite)
 	_load_variants()
+	_load_decorations()
 	_build_blend_masks()
 	_build_blit_geometry()
 
@@ -183,6 +199,45 @@ func _load_variants() -> void:
 		fallback.fill(color)
 		_fallback_tiles[biome] = fallback
 		print("[WorldView] biome '%s': %d variants" % [biome, imgs.size()])
+
+func _load_decorations() -> void:
+	# Decoration assets live in res://assets/decorations/<name>/<name>.png.
+	# Each decoration is hand-assigned to a biome via this table.
+	#
+	# Weights are integer relative frequencies — when a tile's deco hash
+	# falls inside a deco's weight window, that deco wins. Total weight
+	# across all decos for a biome is rolled against PLAINS_DECO_RATE.
+	var spec := {
+		"plains": [
+			{"path": "res://assets/decorations/plains_grass_bush/plains_grass_bush.png", "weight": 7},
+			{"path": "res://assets/decorations/plains_flower_bush/plains_flower_bush.png", "weight": 3},
+		],
+	}
+	for biome in spec.keys():
+		var entries: Array = []
+		for entry in spec[biome]:
+			var path: String = entry["path"]
+			var tex: Texture2D = load(path) as Texture2D
+			if tex == null:
+				push_warning("[WorldView] decoration not found: %s" % path)
+				continue
+			var img := tex.get_image()
+			if img == null:
+				continue
+			if img.is_compressed():
+				img.decompress()
+			if img.get_format() != Image.FORMAT_RGBA8:
+				img.convert(Image.FORMAT_RGBA8)
+			# Decorations are expected to be at TILE_PX. Anything bigger
+			# would overflow the tile in blit_rect; smaller is fine, it'll
+			# sit centred via offset.
+			if img.get_width() != TILE_PX or img.get_height() != TILE_PX:
+				push_warning("[WorldView] decoration %s is %dx%d, not %dx%d"
+					% [path, img.get_width(), img.get_height(), TILE_PX, TILE_PX])
+				continue
+			entries.append({"image": img, "weight": int(entry["weight"])})
+		_decorations[biome] = entries
+		print("[WorldView] decorations '%s': %d entries" % [biome, entries.size()])
 
 func _build_blend_masks() -> void:
 	# Each directional mask is the same size as the variant image
@@ -307,23 +362,53 @@ func _paint_tile(x: int, y: int) -> void:
 		["W", x - 1, y],
 		["E", x + 1, y],
 	]
-	if BLEND_BAND <= 0:
-		return
-	for entry in neighbour_dirs:
-		var dir_name: String = entry[0]
-		var nx: int = entry[1]
-		var ny: int = entry[2]
-		if nx < 0 or ny < 0 or nx >= _dims.x or ny >= _dims.y:
-			continue
-		var n_biome_id: int = _state.tile_biome(nx, ny)
-		if n_biome_id == biome_id:
-			continue
-		var n_biome_name: String = BIOME_NAMES[n_biome_id] if n_biome_id >= 0 and n_biome_id < BIOME_NAMES.size() else ""
-		var n_variant := _variant_for_tile(n_biome_name, nx, ny)
-		var src_rect: Rect2i = _neighbour_src_rects[dir_name]
-		var band_off: Vector2i = _band_dst_offsets[dir_name]
-		var mask: Image = _blend_masks[dir_name]
-		_image.blend_rect_mask(n_variant, mask, src_rect, dst + band_off)
+	if BLEND_BAND > 0:
+		for entry in neighbour_dirs:
+			var dir_name: String = entry[0]
+			var nx: int = entry[1]
+			var ny: int = entry[2]
+			if nx < 0 or ny < 0 or nx >= _dims.x or ny >= _dims.y:
+				continue
+			var n_biome_id: int = _state.tile_biome(nx, ny)
+			if n_biome_id == biome_id:
+				continue
+			var n_biome_name: String = BIOME_NAMES[n_biome_id] if n_biome_id >= 0 and n_biome_id < BIOME_NAMES.size() else ""
+			var n_variant := _variant_for_tile(n_biome_name, nx, ny)
+			var src_rect: Rect2i = _neighbour_src_rects[dir_name]
+			var band_off: Vector2i = _band_dst_offsets[dir_name]
+			var mask: Image = _blend_masks[dir_name]
+			_image.blend_rect_mask(n_variant, mask, src_rect, dst + band_off)
+
+	# Decoration scatter — last so it sits on top of the biome variant and
+	# any neighbour-blend fringe.
+	var deco := _decoration_for_tile(biome_name, x, y)
+	if deco != null:
+		_image.blend_rect(deco, Rect2i(0, 0, TILE_PX, TILE_PX), dst)
+
+func _decoration_for_tile(biome_name: String, x: int, y: int) -> Image:
+	# Returns null when this tile carries no decoration.
+	var entries: Array = _decorations.get(biome_name, [])
+	if entries.is_empty():
+		return null
+	# Two independent hashes:
+	#   `gate` decides whether *any* decoration appears (rate-gated).
+	#   `pick` chooses which decoration based on weight buckets.
+	var gate: float = _hash01(x, y, 0xCAFE)
+	if gate >= PLAINS_DECO_RATE:
+		return null
+	var total_w: int = 0
+	for e in entries:
+		total_w += int(e["weight"])
+	if total_w <= 0:
+		return null
+	var pick: float = _hash01(x, y, 0xBEEF)
+	var threshold: int = int(round(pick * float(total_w)))
+	var acc: int = 0
+	for e in entries:
+		acc += int(e["weight"])
+		if threshold < acc:
+			return e["image"]
+	return entries[-1]["image"]
 
 func _variant_for_tile(biome_name: String, x: int, y: int) -> Image:
 	var arr: Array = _variants.get(biome_name, [])
