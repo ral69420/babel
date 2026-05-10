@@ -4,15 +4,12 @@ extends Node
 ## Owns the long-lived [BabelSim] handle. Loaded as autoload at boot so any
 ## scene can access the simulation through `GameState.sim`.
 ##
-## When the GDExtension `babel_gd` is unavailable (e.g. release without the
-## .so present, CI lint-only run), `sim` falls back to a stub that returns
-## sensible defaults so scenes still load.
+## When the GDExtension `babel_gd` is unavailable, falls back to StubSim —
+## a pure-GDScript procedural world with society loop for demo / testing.
 
-# Note: BabelSim is registered as a GDExtension Resource. If the extension
-# isn't loaded yet, `ClassDB.class_exists("BabelSim")` returns false.
-
-var sim: Resource = null
+var sim = null           # BabelSim (Resource) or StubSim (Node)
 var sim_ready: bool = false
+var _stub: Node = null   # keep reference when using StubSim
 
 func _ready() -> void:
 	_init_sim()
@@ -23,9 +20,12 @@ func _init_sim() -> void:
 		sim_ready = true
 		print("[GameState] BabelSim extension loaded.")
 	else:
-		push_warning("[GameState] BabelSim extension NOT loaded. Running in stub mode.")
-		sim = null
-		sim_ready = false
+		push_warning("[GameState] BabelSim not found — using StubSim.")
+		var StubSimScript := preload("res://scripts/autoload/StubSim.gd")
+		_stub = StubSimScript.new()
+		add_child(_stub)
+		sim = _stub
+		sim_ready = true
 
 func start_world(seed_value: int, width: int, height: int) -> bool:
 	if not sim_ready:
@@ -86,3 +86,17 @@ func season() -> int:
 	if not sim_ready:
 		return 0
 	return sim.season()
+
+func get_npcs() -> Array:
+	if not sim_ready:
+		return []
+	if sim.has_method("get_npcs"):
+		return sim.get_npcs()
+	return []
+
+func get_buildings() -> Array:
+	if not sim_ready:
+		return []
+	if sim.has_method("get_buildings"):
+		return sim.get_buildings()
+	return []
