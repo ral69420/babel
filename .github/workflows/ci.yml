@@ -152,3 +152,14 @@ jobs:
             echo "::error::BabelSim failed to register at runtime"
             exit 1
           fi
+
+      - name: Run sim-invariant headless tests
+        run: |
+          set -o pipefail
+          # `tests/run_all.gd` boots a fresh StubSim, advances 1000
+          # sim-days at a fixed seed, and asserts a handful of
+          # invariants (NPC survival, biome cleanup, determinism, ocean
+          # fraction, asset presence). Any failure prints
+          # `[run_all] FAIL · ...` and exits 1.
+          godot --headless --path godot_project -s tests/run_all.gd 2>&1 | tee /tmp/run_all.log
+          grep -F "[run_all] PASS" /tmp/run_all.log
