@@ -21,6 +21,12 @@ config/icon="res://icon.svg"
 GameState="*res://scripts/autoload/GameState.gd"
 RunConfig="*res://scripts/autoload/RunConfig.gd"
 TimeOfDay="*res://scripts/autoload/TimeOfDay.gd"
+SaveManager="*res://scripts/autoload/SaveManager.gd"
+Localization="*res://scripts/autoload/Localization.gd"
+
+[internationalization]
+
+locale/fallback="en"
 
 [display]
 
