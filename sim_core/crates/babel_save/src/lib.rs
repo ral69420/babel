@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn roundtrip_in_tempdir() {
-        let dir = tempdir();
+        let dir = tempdir("roundtrip");
         let path = dir.join("save.bbl");
         let mut world = World::new(&cfg()).unwrap();
         babel_sim::worldgen::generate(&mut world, &Default::default()).unwrap();
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn bad_magic_rejected() {
-        let dir = tempdir();
+        let dir = tempdir("bad_magic");
         let path = dir.join("bad.bbl");
         std::fs::write(&path, b"not_a_save_file").unwrap();
         match load(&path) {
@@ -174,10 +174,13 @@ mod tests {
         }
     }
 
-    fn tempdir() -> std::path::PathBuf {
+    fn tempdir(label: &str) -> std::path::PathBuf {
+        // Per-test subdirectory so parallel test runs in the same
+        // process don't race on remove_dir_all/create_dir_all of a
+        // shared path (observed flake on macOS CI).
         let base = std::env::temp_dir();
         let mut p = base;
-        p.push(format!("babel_save_test_{}", std::process::id()));
+        p.push(format!("babel_save_test_{}_{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
