@@ -21,6 +21,101 @@ use serde::{Deserialize, Serialize};
 
 use babel_sim::DetRng;
 
+/// Built-in culture identifiers — one per phoneme set in
+/// `content/phoneme_sets/`. Order is **stable** and used as `language_id`
+/// on `Civilization`. Adding a new culture appends; never reorder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum Culture {
+    /// Sand-stone, sibilant, arid.
+    Kheltari = 0,
+    /// River-island, vowel-heavy.
+    Orunmare = 1,
+    /// Stone-mountain, hard.
+    Dvarni = 2,
+    /// Forest-twilight, lateral-rich.
+    Eluran = 3,
+    /// Desert-trader, guttural.
+    Qarasil = 4,
+    /// Snow-tundra, palatalised.
+    Ningaer = 5,
+    /// River-temple, retroflex.
+    Sankhara = 6,
+}
+
+impl Culture {
+    /// Every culture in stable order. Index matches `language_id`.
+    pub const ALL: [Culture; 7] = [
+        Self::Kheltari,
+        Self::Orunmare,
+        Self::Dvarni,
+        Self::Eluran,
+        Self::Qarasil,
+        Self::Ningaer,
+        Self::Sankhara,
+    ];
+
+    /// Numeric id (matches `Civilization::language_id`).
+    #[must_use]
+    pub fn id(self) -> u32 {
+        self as u32
+    }
+
+    /// Decode from numeric id. Returns `None` if out of range.
+    #[must_use]
+    pub fn from_id(id: u32) -> Option<Self> {
+        Self::ALL.get(id as usize).copied()
+    }
+
+    /// Lower-case slug (matches the phoneme-set TOML filename).
+    #[must_use]
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Kheltari => "kheltari",
+            Self::Orunmare => "orunmare",
+            Self::Dvarni => "dvarni",
+            Self::Eluran => "eluran",
+            Self::Qarasil => "qarasil",
+            Self::Ningaer => "ningaer",
+            Self::Sankhara => "sankhara",
+        }
+    }
+}
+
+/// Phoneme-set TOML embedded at compile time so `babel_lang` has no runtime
+/// I/O dependency. Order matches [`Culture::ALL`].
+const KHELTARI_TOML: &str = include_str!("../../../../content/phoneme_sets/kheltari.toml");
+const ORUNMARE_TOML: &str = include_str!("../../../../content/phoneme_sets/orunmare.toml");
+const DVARNI_TOML: &str = include_str!("../../../../content/phoneme_sets/dvarni.toml");
+const ELURAN_TOML: &str = include_str!("../../../../content/phoneme_sets/eluran.toml");
+const QARASIL_TOML: &str = include_str!("../../../../content/phoneme_sets/qarasil.toml");
+const NINGAER_TOML: &str = include_str!("../../../../content/phoneme_sets/ningaer.toml");
+const SANKHARA_TOML: &str = include_str!("../../../../content/phoneme_sets/sankhara.toml");
+
+/// Build all seven default languages, in [`Culture::ALL`] order. Panics if
+/// the embedded TOML is malformed — that is a build-time bug, not a runtime
+/// one.
+#[must_use]
+pub fn default_languages() -> Vec<Language> {
+    let toml_for = |c: Culture| match c {
+        Culture::Kheltari => KHELTARI_TOML,
+        Culture::Orunmare => ORUNMARE_TOML,
+        Culture::Dvarni => DVARNI_TOML,
+        Culture::Eluran => ELURAN_TOML,
+        Culture::Qarasil => QARASIL_TOML,
+        Culture::Ningaer => NINGAER_TOML,
+        Culture::Sankhara => SANKHARA_TOML,
+    };
+    Culture::ALL
+        .iter()
+        .map(|c| {
+            let phon =
+                PhonemeSet::from_toml(toml_for(*c)).expect("embedded phoneme set must parse");
+            Language::build(phon)
+        })
+        .collect()
+}
+
 /// Hand-authored phoneme set. Loaded from TOML.
 ///
 /// ```toml
@@ -298,5 +393,29 @@ mod tests {
             let w = lang.word(&mut rng, 3);
             assert!(!w.contains(bad), "got banned substring in {w:?}");
         }
+    }
+
+    #[test]
+    fn default_languages_loads_all_seven() {
+        let langs = default_languages();
+        assert_eq!(langs.len(), Culture::ALL.len());
+        // Every language must be able to produce a non-empty name.
+        for (i, lang) in langs.iter().enumerate() {
+            let mut rng = DetRng::from_seed(i as u64);
+            let n = lang.name(&mut rng);
+            assert!(
+                !n.is_empty(),
+                "{} produced empty name",
+                Culture::ALL[i].slug()
+            );
+        }
+    }
+
+    #[test]
+    fn culture_id_roundtrip() {
+        for c in Culture::ALL {
+            assert_eq!(Culture::from_id(c.id()), Some(c));
+        }
+        assert_eq!(Culture::from_id(99), None);
     }
 }

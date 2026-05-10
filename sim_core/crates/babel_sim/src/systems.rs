@@ -71,12 +71,35 @@ fn mortality(w: &mut World, tick: u64) {
     }
 }
 
-fn daily_pulse(_w: &mut World, _tick: u64) {
-    // Placeholder for daily simulation logic (births, food, mood, etc.).
+fn daily_pulse(w: &mut World, _tick: u64) {
+    // Cheap deterministic city growth: every game-day each city gains a flat
+    // +1 pop (capped). This is intentionally simple — full demographic
+    // model arrives with the food / mood systems. Walks `cities` in stable
+    // SlotVec order so it never perturbs RNG.
+    const POP_CAP: u32 = 50_000;
+    for (_id, city) in w.cities.iter_mut() {
+        if city.population < POP_CAP {
+            city.population = city.population.saturating_add(1);
+        }
+    }
 }
 
-fn yearly_pulse(_w: &mut World, _tick: u64) {
-    // Placeholder for yearly logic (tradition adoption, faction formation).
+fn yearly_pulse(w: &mut World, _tick: u64) {
+    // Sync each tile's `pop` field with its owning city's population so the
+    // renderer shows growth without per-tick churn. Cheap O(cities).
+    let dims = w.dims;
+    let mut snaps: Vec<(i32, i32, u16)> = Vec::with_capacity(w.cities.len());
+    for (_id, city) in w.cities.iter() {
+        snaps.push((city.x, city.y, city.population.min(u16::MAX as u32) as u16));
+    }
+    for (x, y, pop) in snaps {
+        if x < 0 || y < 0 || x >= dims.w as i32 || y >= dims.h as i32 {
+            continue;
+        }
+        if let Some(t) = w.tile_mut(x, y) {
+            t.pop = pop;
+        }
+    }
 }
 
 // =====================================================================

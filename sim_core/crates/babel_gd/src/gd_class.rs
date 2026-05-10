@@ -103,4 +103,95 @@ impl BabelSim {
     fn last_error(&self) -> GString {
         GString::from(self.inner.last_error())
     }
+
+    /// Number of live civilizations.
+    #[func]
+    fn civ_count(&self) -> i32 {
+        self.inner.civ_count() as i32
+    }
+
+    /// Name of the `idx`-th civilization.
+    #[func]
+    fn civ_name(&self, idx: i32) -> GString {
+        GString::from(self.inner.civ_name(idx.max(0) as u32))
+    }
+
+    /// Number of live cities.
+    #[func]
+    fn city_count(&self) -> i32 {
+        self.inner.city_count() as i32
+    }
+
+    /// Name of the `idx`-th city.
+    #[func]
+    fn city_name(&self, idx: i32) -> GString {
+        GString::from(self.inner.city_name(idx.max(0) as u32))
+    }
+
+    /// Position `(x, y)` of the `idx`-th city.
+    #[func]
+    fn city_pos(&self, idx: i32) -> Vector2i {
+        let (x, y) = self.inner.city_pos(idx.max(0) as u32);
+        Vector2i::new(x, y)
+    }
+
+    /// Population of the `idx`-th city.
+    #[func]
+    fn city_population(&self, idx: i32) -> i32 {
+        self.inner.city_population(idx.max(0) as u32) as i32
+    }
+
+    /// Up to `max` most-recent events as headline strings.
+    #[func]
+    fn recent_events(&self, max: i32) -> PackedStringArray {
+        let evts = self.inner.recent_events(max.max(0) as u32);
+        let mut arr = PackedStringArray::new();
+        for e in evts {
+            arr.push(&GString::from(e));
+        }
+        arr
+    }
+
+    /// Number of live NPCs.
+    #[func]
+    fn npc_count(&self) -> i32 {
+        self.inner.npc_count() as i32
+    }
+
+    /// Name of the `idx`-th live NPC.
+    #[func]
+    fn npc_name(&self, idx: i32) -> GString {
+        GString::from(self.inner.npc_name(idx.max(0) as u32))
+    }
+
+    /// Role of the `idx`-th live NPC.
+    #[func]
+    fn npc_role(&self, idx: i32) -> GString {
+        GString::from(self.inner.npc_role(idx.max(0) as u32))
+    }
+
+    /// Civ name of the `idx`-th live NPC.
+    #[func]
+    fn npc_civ_name(&self, idx: i32) -> GString {
+        GString::from(self.inner.npc_civ_name(idx.max(0) as u32))
+    }
+
+    /// Position of the `idx`-th live NPC.
+    #[func]
+    fn npc_pos(&self, idx: i32) -> Vector2i {
+        let (x, y) = self.inner.npc_pos(idx.max(0) as u32);
+        Vector2i::new(x, y)
+    }
+
+    /// Health of the `idx`-th live NPC.
+    #[func]
+    fn npc_health(&self, idx: i32) -> i32 {
+        i32::from(self.inner.npc_health(idx.max(0) as u32))
+    }
+
+    /// Summon a Strugatsky "Zone" anomaly at `(x, y)`. Returns tiles tagged.
+    #[func]
+    fn summon_zone(&mut self, x: i32, y: i32) -> i32 {
+        self.inner.summon_zone(x, y) as i32
+    }
 }

@@ -261,6 +261,33 @@ impl World {
     pub fn run_systems_one_tick(&mut self) {
         crate::systems::run_one_tick(self);
     }
+
+    /// Tag `(cx, cy)` and its 8-neighbours with [`tile_tags::ZONE`] and push
+    /// a [`crate::event::EventKind::ZoneAppeared`] event. This is the
+    /// Strugatsky "Roadside Picnic" anomaly hook the player can fire from
+    /// the host (e.g. on Z key).
+    ///
+    /// Returns the number of tiles successfully tagged (1..=9, depending on
+    /// boundary clipping). Returns `0` if the centre tile itself was out of
+    /// bounds.
+    pub fn summon_zone(&mut self, cx: i32, cy: i32) -> u32 {
+        if self.tile(cx, cy).is_none() {
+            return 0;
+        }
+        let mut tagged = 0u32;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if let Some(tile) = self.tile_mut(cx + dx, cy + dy) {
+                    tile.set_tag(tile_tags::ZONE);
+                    tagged += 1;
+                }
+            }
+        }
+        let tick = self.clock.ticks();
+        self.events
+            .push(tick, crate::event::EventKind::ZoneAppeared { x: cx, y: cy });
+        tagged
+    }
 }
 
 #[cfg(test)]
@@ -309,5 +336,63 @@ mod tests {
         assert!(w.tile(4, 0).is_none());
         assert!(w.tile(0, 4).is_none());
         assert!(w.tile(3, 3).is_some());
+    }
+
+    #[test]
+    fn summon_zone_tags_3x3_and_pushes_event() {
+        let cfg = SimConfig {
+            seed: 0,
+            dims: WorldDims { w: 8, h: 8 },
+            starting_civs: 0,
+            starting_npcs_per_civ: 0,
+        };
+        let mut w = World::new(&cfg).unwrap();
+        let tagged = w.summon_zone(4, 4);
+        assert_eq!(tagged, 9, "interior cell should tag full 3x3");
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let t = w.tile(4 + dx, 4 + dy).unwrap();
+                assert!(t.has_tag(tile_tags::ZONE));
+            }
+        }
+        // Outside the 3x3 should NOT be tagged.
+        assert!(!w.tile(2, 4).unwrap().has_tag(tile_tags::ZONE));
+        // Event recorded.
+        assert_eq!(w.events.len(), 1);
+        let ev = &w.events.events[0];
+        match ev.kind {
+            crate::event::EventKind::ZoneAppeared { x, y } => {
+                assert_eq!((x, y), (4, 4));
+            }
+            ref other => panic!("expected ZoneAppeared, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn summon_zone_clips_at_corner() {
+        let cfg = SimConfig {
+            seed: 0,
+            dims: WorldDims { w: 4, h: 4 },
+            starting_civs: 0,
+            starting_npcs_per_civ: 0,
+        };
+        let mut w = World::new(&cfg).unwrap();
+        // Top-left corner — only 4 tiles should be reachable.
+        let tagged = w.summon_zone(0, 0);
+        assert_eq!(tagged, 4);
+    }
+
+    #[test]
+    fn summon_zone_rejects_out_of_bounds() {
+        let cfg = SimConfig {
+            seed: 0,
+            dims: WorldDims { w: 4, h: 4 },
+            starting_civs: 0,
+            starting_npcs_per_civ: 0,
+        };
+        let mut w = World::new(&cfg).unwrap();
+        assert_eq!(w.summon_zone(-1, 0), 0);
+        assert_eq!(w.summon_zone(0, 4), 0);
+        assert!(w.events.is_empty());
     }
 }
