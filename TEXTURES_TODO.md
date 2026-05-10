@@ -17,6 +17,42 @@ priority. P0 = unblock current PR, P3 = late-game phases.
   silhouette-readable from any rotation — they're drawn twice at 90°.
 - **Square canvas preferred** (64×64 / 128×128) unless noted.
 
+### Perspective — **3/4 front-facing** (NOT side / top / iso)
+
+The world is rendered in 3D with an *orbiting* camera that the player
+can pan, zoom, and rotate. Sprites are billboards (`Sprite3D` with
+`BILLBOARD_FIXED_Y`) that always rotate to face the camera. That rules
+out a fixed perspective:
+
+- ❌ **Pure side-scroll** (Mario / Castlevania profile). Would look
+  like flat posters glued to the ground when the camera is tilted.
+- ❌ **Pure top-down** (early Pokémon, Hyper Light Drifter map view).
+  Would render trees as round blobs and NPCs as scalps.
+- ❌ **True isometric** (Diablo II, classic SimCity). Iso only works
+  with a fixed camera; ours rotates, so iso art would "skew" when the
+  player turns.
+
+**✅ Use 3/4 front-facing** — front view with a 15–25° downward tilt,
+left/right symmetric, bottom touching the ground. Reference look:
+
+- *Stardew Valley* — buildings, trees, NPCs.
+- *Octopath Traveler* (HD-2D).
+- *Don't Starve* — trees, monsters.
+- *Pokémon Sword/Shield* canopies.
+- *Zelda: Link's Awakening (Switch remake)* — buildings.
+
+Concrete rules per asset class:
+
+| Asset class | Perspective | Why |
+|---|---|---|
+| Buildings (house, granary, temple, etc.) | 3/4 front. Show fascia + a sliver of roof. Symmetric. | Reads as 3-D on a tilted camera; looks fine when the player rotates. |
+| Trees / ruins / decorative shrubs | 3/4 front + cross-billboarded (drawn twice at 90°). Symmetric. | Cross-billboard hides "flat poster" feel from any orbit angle. |
+| NPCs | Front-facing 3/4 (camera looks down at them). | Matches `BILLBOARD_FIXED_Y` — body always points at camera. |
+| NPC walk cycles | Same 3/4 front; for now we use `walk_south` for all directions. If you later draw `walk_north` we can split. | Tilted camera reads either direction the same way. |
+| Tile textures (ground) | **Top-down**, no perspective. | Tiles lie flat on terrain meshes that already provide the 3-D look. |
+| UI icons (Calvino themes, research nodes, chronicle book) | **Flat 2-D**, no perspective. Like menu icons. | They live in `CanvasLayer`, not the 3-D world. |
+| Flag SVGs | **Flat 2-D**, vector. | Recoloured at runtime, displayed on UI banners. |
+
 Drop new assets into `godot_project/assets/...` mirroring the existing
 folder structure. Each PNG should sit next to a `.png.import` (Godot
 auto-creates this on first open, but if you copy into the repo headless
