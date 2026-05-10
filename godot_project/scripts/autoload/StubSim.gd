@@ -31,10 +31,33 @@ enum Biome { OCEAN, COAST, PLAINS, FOREST, HILLS, MOUNTAIN, DESERT, TUNDRA }
 
 # ── Building stages ──────────────────────────────────────────────────
 enum BuildStage { FOUNDATION, FRAME, WALLS, ROOF, COMPLETE }
+## Cumulative wood required to clear each stage. progress_days (formerly
+## a pure time counter) now mirrors wood_invested 1:1.
 const STAGE_THRESHOLDS := [5, 12, 22, 30]
+const BUILDING_TOTAL_WOOD := 30
 
 # ── NPC age stages ───────────────────────────────────────────────────
 enum AgeStage { CHILD, ADULT, ELDER }
+
+# ── Trees ───────────────────────────────────────────────────────────────────
+enum TreeStage { SAPLING, YOUNG, ADULT, STUMP, EMPTY }
+## Days a tree spends in each stage before promoting to the next.
+## ADULT entries don't auto-decay; they only leave that stage when
+## chopped. EMPTY tiles are pruned and never re-enter the array.
+const TREE_SAPLING_DAYS := 60
+const TREE_YOUNG_DAYS := 90
+const TREE_STUMP_DAYS := 30
+const TREE_CHOP_DAYS := 5
+const WOOD_PER_TREE := 10
+const TREE_REGROWTH_RADIUS := 4
+
+# ── NPC task FSM ────────────────────────────────────────────────────────────────
+enum NpcTask { IDLE, GOTO_TREE, CHOPPING }
+## A civ stops dispatching new choppers once its stockpile holds at
+## least this much wood. Keeps the forest alive when it isn't needed.
+const CIV_WOOD_TARGET := BUILDING_TOTAL_WOOD * 2
+## How far a chopper will walk for a tree (Manhattan distance, tiles).
+const CHOPPER_RANGE := 18
 
 # ── Internal arrays ──────────────────────────────────────────────────
 var _biomes: PackedByteArray
@@ -51,6 +74,14 @@ var next_npc_id: int = 0
 # ── Building data ────────────────────────────────────────────────────
 var buildings: Array[Dictionary] = []
 var next_building_id: int = 0
+
+# ── Tree data ────────────────────────────────────────────────────────────────────
+var trees: Array[Dictionary] = []
+var next_tree_id: int = 0
+## Tile (x,y) → index into [trees]. Lets _system_trees() check whether a
+## given tile is already occupied without an O(n) scan, which matters
+## once we have ~20k trees on a 256×256 forested map.
+var _tree_at_tile: Dictionary = {}
 
 # ── Civilizations ────────────────────────────────────────────────────
 ## Each entry: { id, name, color, spawn_x, spawn_y }. Populated during
@@ -78,18 +109,22 @@ func start(seed_val: int, w: int = DEFAULT_MAP_W, h: int = DEFAULT_MAP_H, civ_co
 	npcs.clear()
 	buildings.clear()
 	civs.clear()
+	trees.clear()
+	_tree_at_tile.clear()
 	next_npc_id = 0
 	next_building_id = 0
+	next_tree_id = 0
 	_ticks = 0
 	_biomes.resize(map_w * map_h)
 	_elevation.resize(map_w * map_h)
 	_tags.resize(map_w * map_h)
 	_generate_world()
+	_seed_initial_trees()
 	_spawn_initial_civs(civ_count)
 	world_started = true
 	print(
-		"[StubSim] World started. %dx%d, %d civs, NPCs: %d, Buildings: %d"
-		% [map_w, map_h, civs.size(), npcs.size(), buildings.size()]
+		"[StubSim] World started. %dx%d, %d civs, NPCs: %d, Buildings: %d, Trees: %d"
+		% [map_w, map_h, civs.size(), npcs.size(), buildings.size(), trees.size()]
 	)
 	return true
 
@@ -118,6 +153,14 @@ func civ_color(civ_id: int) -> Color:
 	if civ_id < 0 or civ_id >= civs.size():
 		return Color(0.7, 0.7, 0.7)
 	return civs[civ_id].color
+
+func get_trees() -> Array[Dictionary]:
+	return trees
+
+func civ_wood(civ_id: int) -> int:
+	if civ_id < 0 or civ_id >= civs.size():
+		return 0
+	return int(civs[civ_id].stockpile.wood)
 
 func advance(frame_ticks: int) -> int:
 	var total := frame_ticks * _time_scale
@@ -248,6 +291,7 @@ func _spawn_initial_civs(civ_count: int) -> void:
 			"color": CIV_PALETTE[civ_id],
 			"spawn_x": center.x,
 			"spawn_y": center.y,
+			"stockpile": {"wood": BUILDING_TOTAL_WOOD},
 		})
 		# Place 2 starter houses
 		for _h in 2:
@@ -324,6 +368,9 @@ func _spawn_npc(x: int, y: int, civ_id: int, age_years: int) -> int:
 		"target_x": x,
 		"target_y": y,
 		"is_child": age_years < 14,
+		"task": NpcTask.IDLE,
+		"task_target_id": -1,
+		"task_progress": 0,
 	}
 	npcs.append(npc)
 	return id
@@ -337,7 +384,8 @@ func _place_building(x: int, y: int, civ_id: int, instant: bool = false) -> int:
 		"tile_y": y,
 		"civ_id": civ_id,
 		"stage": BuildStage.COMPLETE if instant else BuildStage.FOUNDATION,
-		"progress_days": 30 if instant else 0,
+		"progress_days": BUILDING_TOTAL_WOOD if instant else 0,
+		"wood_invested": BUILDING_TOTAL_WOOD if instant else 0,
 		"builder_ids": [],
 		"owner_pair": [-1, -1],
 	}
@@ -350,9 +398,11 @@ func _place_building(x: int, y: int, civ_id: int, instant: bool = false) -> int:
 # ─────────────────────────────────────────────────────────────────────
 func _tick_daily() -> void:
 	_system_aging()
+	_system_npc_tasks()
 	_system_movement()
 	_system_pairing()
 	_system_gestation()
+	_system_trees()
 	_system_construction()
 	_system_building_request()
 
@@ -385,19 +435,21 @@ func _system_movement() -> void:
 	for npc in npcs:
 		if not npc.alive:
 			continue
-		npc.move_timer -= 1
-		if npc.move_timer <= 0:
-			npc.move_timer = _rng.randi_range(2, 8)
-			# Pick new target within radius
-			var radius: int = 3 if npc.is_child else 5
-			var tx: int = int(npc.x) + _rng.randi_range(-radius, radius)
-			var ty: int = int(npc.y) + _rng.randi_range(-radius, radius)
-			tx = clampi(tx, 1, map_w - 2)
-			ty = clampi(ty, 1, map_h - 2)
-			if _is_walkable(tx, ty):
-				npc.target_x = tx
-				npc.target_y = ty
-		# Move toward target
+		if int(npc.task) == NpcTask.CHOPPING:
+			continue   # chopper stands still while felling
+		if int(npc.task) != NpcTask.GOTO_TREE:
+			npc.move_timer -= 1
+			if npc.move_timer <= 0:
+				npc.move_timer = _rng.randi_range(2, 8)
+				var radius: int = 3 if npc.is_child else 5
+				var tx: int = int(npc.x) + _rng.randi_range(-radius, radius)
+				var ty: int = int(npc.y) + _rng.randi_range(-radius, radius)
+				tx = clampi(tx, 1, map_w - 2)
+				ty = clampi(ty, 1, map_h - 2)
+				if _is_walkable(tx, ty):
+					npc.target_x = tx
+					npc.target_y = ty
+		# Move toward target (idle wander or task target)
 		if npc.x != npc.target_x or npc.y != npc.target_y:
 			var dx: int = signi(int(npc.target_x) - int(npc.x))
 			var dy: int = signi(int(npc.target_y) - int(npc.y))
@@ -487,12 +539,25 @@ func _system_construction() -> void:
 			if builder != null and builder.alive:
 				builder_count += 1
 		if builder_count == 0:
-			builder_count = 1  # At least slow progress
-		b.progress_days += builder_count
-		# Update stage
+			builder_count = 1   # at least one ghost builder
+		# Wood-gated progress: a building only advances if its civ has wood
+		# left to spend. Each unit of wood = one day of progress, capped by
+		# the number of available builders (parallel labour).
+		var civ_id: int = int(b.civ_id)
+		if civ_id < 0 or civ_id >= civs.size():
+			continue
+		var stockpile: Dictionary = civs[civ_id].stockpile
+		var need: int = BUILDING_TOTAL_WOOD - int(b.wood_invested)
+		var transfer: int = mini(builder_count, mini(need, int(stockpile.wood)))
+		if transfer <= 0:
+			continue
+		stockpile.wood = int(stockpile.wood) - transfer
+		b.wood_invested = int(b.wood_invested) + transfer
+		b.progress_days = int(b.wood_invested)
 		if b.progress_days >= STAGE_THRESHOLDS[3]:
-			b.stage = BuildStage.COMPLETE
-			_recent_events.append({"type": "building_complete", "id": b.id})
+			if b.stage != BuildStage.COMPLETE:
+				b.stage = BuildStage.COMPLETE
+				_recent_events.append({"type": "building_complete", "id": b.id})
 		elif b.progress_days >= STAGE_THRESHOLDS[2]:
 			b.stage = BuildStage.ROOF
 		elif b.progress_days >= STAGE_THRESHOLDS[1]:
@@ -547,6 +612,216 @@ func _system_building_request() -> void:
 			# Assign builders
 			buildings[buildings.size() - 1].builder_ids = [npc.id, partner.id]
 			buildings[buildings.size() - 1].owner_pair = [npc.id, partner.id]
+
+# ─────────────────────────────────────────────────────────────────────
+# Tree systems
+# ─────────────────────────────────────────────────────────────────────
+func _tree_key(x: int, y: int) -> int:
+	return y * map_w + x
+
+func _seed_initial_trees() -> void:
+	# One tree per qualifying tile, with biome-dependent density.
+	# Forest tiles get a tree most of the time, hills sometimes, plains
+	# rarely. Trees start ADULT so the world doesn't read as bald on
+	# day 1, and so chopping is meaningful right away.
+	for ty in map_h:
+		for tx in map_w:
+			var biome: int = tile_biome(tx, ty)
+			var chance: float
+			match biome:
+				Biome.FOREST: chance = 0.55
+				Biome.HILLS:  chance = 0.18
+				Biome.PLAINS: chance = 0.06
+				_: chance = 0.0
+			if chance == 0.0 or _rng.randf() > chance:
+				continue
+			_spawn_tree(tx, ty, TreeStage.ADULT)
+
+func _spawn_tree(x: int, y: int, stage: int) -> int:
+	if _tree_at_tile.has(_tree_key(x, y)):
+		return -1
+	var id := next_tree_id
+	next_tree_id += 1
+	var t := {
+		"id": id,
+		"x": x,
+		"y": y,
+		"stage": stage,
+		"age_in_stage": 0,
+		"chop_progress": 0,
+		"chopper_id": -1,
+	}
+	trees.append(t)
+	_tree_at_tile[_tree_key(x, y)] = id
+	return id
+
+func _find_tree(id: int):
+	for t in trees:
+		if t.id == id:
+			return t
+	return null
+
+func _has_adult_neighbour(x: int, y: int, radius: int) -> bool:
+	for dy in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var key: int = _tree_key(x + dx, y + dy)
+			if not _tree_at_tile.has(key):
+				continue
+			var tid: int = int(_tree_at_tile[key])
+			var t = _find_tree(tid)
+			if t != null and int(t.stage) == TreeStage.ADULT:
+				return true
+	return false
+
+func _system_trees() -> void:
+	var to_remove: Array[int] = []
+	for t in trees:
+		t.age_in_stage += 1
+		match int(t.stage):
+			TreeStage.SAPLING:
+				if int(t.age_in_stage) >= TREE_SAPLING_DAYS:
+					t.stage = TreeStage.YOUNG
+					t.age_in_stage = 0
+			TreeStage.YOUNG:
+				if int(t.age_in_stage) >= TREE_YOUNG_DAYS:
+					t.stage = TreeStage.ADULT
+					t.age_in_stage = 0
+			TreeStage.STUMP:
+				if int(t.age_in_stage) >= TREE_STUMP_DAYS:
+					if _has_adult_neighbour(int(t.x), int(t.y), TREE_REGROWTH_RADIUS):
+						t.stage = TreeStage.SAPLING
+						t.age_in_stage = 0
+					else:
+						# No seed source nearby - mark for removal so the
+						# tile becomes available again.
+						to_remove.append(int(t.id))
+			_: pass
+	if not to_remove.is_empty():
+		_prune_trees(to_remove)
+
+func _prune_trees(ids: Array[int]) -> void:
+	var lookup: Dictionary = {}
+	for id in ids:
+		lookup[id] = true
+	var kept: Array[Dictionary] = []
+	for t in trees:
+		if lookup.has(int(t.id)):
+			_tree_at_tile.erase(_tree_key(int(t.x), int(t.y)))
+			continue
+		kept.append(t)
+	trees = kept
+
+# ─────────────────────────────────────────────────────────────────────
+# NPC task FSM
+# ─────────────────────────────────────────────────────────────────────
+func _can_assign_chopping(npc: Dictionary) -> bool:
+	if not npc.alive or npc.is_child:
+		return false
+	if int(npc.task) != NpcTask.IDLE:
+		return false
+	if int(npc.gestation_days) >= 0:
+		return false
+	# A pregnant or already-housed-but-incomplete builder we leave alone
+	# only if their building is still under construction.
+	if int(npc.home_id) >= 0:
+		for b in buildings:
+			if int(b.id) == int(npc.home_id) and int(b.stage) != BuildStage.COMPLETE:
+				return false
+	return true
+
+func _find_nearest_adult_tree(from_x: int, from_y: int, max_dist: int) -> int:
+	var best_id: int = -1
+	var best_d: int = max_dist + 1
+	for t in trees:
+		if int(t.stage) != TreeStage.ADULT:
+			continue
+		if int(t.chopper_id) >= 0:
+			continue
+		var d: int = absi(int(t.x) - from_x) + absi(int(t.y) - from_y)
+		if d < best_d:
+			best_d = d
+			best_id = int(t.id)
+	return best_id
+
+func _system_npc_tasks() -> void:
+	# 1) For each civ that needs wood, dispatch idle adults toward the
+	#    nearest unreserved adult tree.
+	for civ in civs:
+		var civ_id: int = int(civ.id)
+		var stockpile: Dictionary = civ.stockpile
+		if int(stockpile.wood) >= CIV_WOOD_TARGET:
+			continue
+		for npc in npcs:
+			if int(npc.civ_id) != civ_id:
+				continue
+			if not _can_assign_chopping(npc):
+				continue
+			var tid: int = _find_nearest_adult_tree(int(npc.x), int(npc.y), CHOPPER_RANGE)
+			if tid < 0:
+				continue
+			var t = _find_tree(tid)
+			if t == null:
+				continue
+			t.chopper_id = int(npc.id)
+			npc.task = NpcTask.GOTO_TREE
+			npc.task_target_id = tid
+			npc.task_progress = 0
+			npc.target_x = int(t.x)
+			npc.target_y = int(t.y)
+	# 2) Advance each task in flight.
+	for npc in npcs:
+		if not npc.alive:
+			continue
+		var task: int = int(npc.task)
+		if task == NpcTask.IDLE:
+			continue
+		var t = _find_tree(int(npc.task_target_id))
+		if t == null or int(t.stage) != TreeStage.ADULT:
+			# Tree disappeared (chopped by someone else, removed, etc.) —
+			# release the chopper without crediting wood.
+			_release_chopper(npc)
+			continue
+		# Keep walking: target may have shifted, e.g. tree was moved (it
+		# can't be, but defensive).
+		npc.target_x = int(t.x)
+		npc.target_y = int(t.y)
+		var dist: int = absi(int(npc.x) - int(t.x)) + absi(int(npc.y) - int(t.y))
+		if task == NpcTask.GOTO_TREE:
+			if dist <= 1:
+				npc.task = NpcTask.CHOPPING
+				npc.task_progress = 0
+		elif task == NpcTask.CHOPPING:
+			if dist > 1:
+				# Got displaced — restart approach.
+				npc.task = NpcTask.GOTO_TREE
+				continue
+			npc.task_progress = int(npc.task_progress) + 1
+			if int(npc.task_progress) >= TREE_CHOP_DAYS:
+				_complete_chopping(npc, t)
+
+func _complete_chopping(npc: Dictionary, t: Dictionary) -> void:
+	t.stage = TreeStage.STUMP
+	t.age_in_stage = 0
+	t.chopper_id = -1
+	var civ_id: int = int(npc.civ_id)
+	if civ_id >= 0 and civ_id < civs.size():
+		civs[civ_id].stockpile.wood = int(civs[civ_id].stockpile.wood) + WOOD_PER_TREE
+	_recent_events.append({
+		"type": "tree_chopped",
+		"civ_id": civ_id,
+		"npc_id": int(npc.id),
+		"tree_id": int(t.id),
+		"x": int(t.x),
+		"y": int(t.y),
+	})
+	npc.task = NpcTask.IDLE
+	npc.task_target_id = -1
+	npc.task_progress = 0
+
+func _release_chopper(npc: Dictionary) -> void:
+	npc.task = NpcTask.IDLE
+	npc.task_target_id = -1
+	npc.task_progress = 0
 
 func _find_npc(id: int):
 	for npc in npcs:
