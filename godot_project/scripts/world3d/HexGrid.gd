@@ -314,19 +314,17 @@ func _update_buildings() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _building_texture
 			sprite.pixel_size = 0.05
-			# Buildings anchored — no billboard, fixed on hex
-			sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+			# Y-fixed billboard: rotates horizontally to face camera,
+			# stays upright vertically (no tilt when camera goes up/down)
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-			sprite.axis = Vector3.AXIS_Y
 			_entity_root.add_child(sprite)
 			_building_sprites[bld.id] = sprite
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, pos.y + 0.4, pos.z)
-		# Face south (fixed rotation, not following camera)
-		sprite.rotation_degrees = Vector3(-90, 0, 0)
 
 		var stage: int = bld.stage
 		if stage == 4:
