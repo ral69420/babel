@@ -217,3 +217,20 @@ func current_sim_day() -> int:
 	if _society and _society.has_method("current_sim_day"):
 		return _society.current_sim_day()
 	return 0
+
+# ── Event stream pass-throughs ────────────────────────────────────────
+## Drains the simulation's recent-events queue. Caller (typically Main /
+## an event listener) is expected to consume immediately — the queue
+## empties on every read so two consumers cannot share it without
+## duplication.
+func recent_events() -> Array:
+	if _society and _society.has_method("recent_events"):
+		return _society.recent_events()
+	return []
+
+# ── Save / load helpers ───────────────────────────────────────────────
+## Direct access to the society loop node. Used by [SaveManager] and by
+## test code that needs to call StubSim methods that aren't surfaced as
+## individual pass-throughs (e.g. [to_save_dict] / [load_from_dict]).
+func society() -> Node:
+	return _society

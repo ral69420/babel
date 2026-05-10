@@ -243,6 +243,159 @@ func recent_events() -> Array[Dictionary]:
 	return evts
 
 # ─────────────────────────────────────────────────────────────────────
+# Save / Load
+# ─────────────────────────────────────────────────────────────────────
+const SAVE_FORMAT_VERSION := 1
+
+## Snapshot the entire society loop state into a JSON-safe Dictionary.
+## Inverse: [load_from_dict]. Pass-through is in [SaveManager], not in
+## GameState — this keeps the save format owned by the data layer.
+##
+## PackedByteArrays are emitted as base64 strings so the save file stays
+## reasonably small (~85 KB for a 256² map vs. ~400 KB if we wrote raw
+## arrays of ints). PackedInt32Array uses the same trick via
+## [_int32_array_to_b64].
+##
+## Civ Dictionaries get a shallow copy so we can replace [color] with an
+## RGBA array (JSON has no Color type). NPC / building / tree dicts are
+## already plain primitives and round-trip directly.
+func to_save_dict() -> Dictionary:
+	return {
+		"version": SAVE_FORMAT_VERSION,
+		"map_w": map_w,
+		"map_h": map_h,
+		"seed_value": _seed_value,
+		"ticks": _ticks,
+		"time_scale": _time_scale,
+		"rng_state": int(_rng.state),
+		"world_started": world_started,
+		"biomes_b64": Marshalls.raw_to_base64(_biomes),
+		"elevation_b64": Marshalls.raw_to_base64(_elevation),
+		"tags_b64": Marshalls.raw_to_base64(_tags),
+		"tile_owner_b64": _int32_array_to_b64(_tile_owner),
+		"territory_version": _territory_version,
+		"next_npc_id": next_npc_id,
+		"next_building_id": next_building_id,
+		"next_tree_id": next_tree_id,
+		"npcs": npcs,
+		"buildings": buildings,
+		"trees": trees,
+		"tree_at_tile": _tree_at_tile_to_save(),
+		"civs": _civs_to_save(),
+	}
+
+## Replace the entire society loop state with [d]. Bails out (returning
+## false) on a missing required key or a version we don't know how to
+## migrate. Caller is expected to call this before any [advance] /
+## [recent_events] consumption that frame so the simulation tick we
+## resume from sees the loaded snapshot, not a stale one.
+func load_from_dict(d: Dictionary) -> bool:
+	if not d.has("version"):
+		push_warning("[StubSim] save dict missing version")
+		return false
+	if int(d.version) != SAVE_FORMAT_VERSION:
+		push_warning("[StubSim] save format v%d not supported (need v%d)" % [int(d.version), SAVE_FORMAT_VERSION])
+		return false
+	map_w = int(d.map_w)
+	map_h = int(d.map_h)
+	_seed_value = int(d.seed_value)
+	_ticks = int(d.ticks)
+	_time_scale = int(d.time_scale)
+	_rng.seed = _seed_value
+	if d.has("rng_state"):
+		_rng.state = int(d.rng_state)
+	world_started = bool(d.world_started)
+	_biomes = Marshalls.base64_to_raw(String(d.biomes_b64))
+	_elevation = Marshalls.base64_to_raw(String(d.elevation_b64))
+	_tags = Marshalls.base64_to_raw(String(d.tags_b64))
+	_tile_owner = _b64_to_int32_array(String(d.tile_owner_b64))
+	_territory_version = int(d.territory_version)
+	next_npc_id = int(d.next_npc_id)
+	next_building_id = int(d.next_building_id)
+	next_tree_id = int(d.next_tree_id)
+	npcs = _array_of_dicts(d.npcs)
+	buildings = _array_of_dicts(d.buildings)
+	trees = _array_of_dicts(d.trees)
+	_tree_at_tile = _tree_at_tile_from_save(d.tree_at_tile)
+	civs = _civs_from_save(d.civs)
+	_recent_events.clear()
+	return true
+
+func _civs_to_save() -> Array:
+	var out: Array = []
+	for c in civs:
+		var copy: Dictionary = c.duplicate(true)
+		var col: Color = c.color if c.has("color") else Color.WHITE
+		copy["color"] = [col.r, col.g, col.b, col.a]
+		out.append(copy)
+	return out
+
+func _civs_from_save(raw: Variant) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if typeof(raw) != TYPE_ARRAY:
+		return out
+	for entry in raw:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var copy: Dictionary = (entry as Dictionary).duplicate(true)
+		var col_data: Variant = copy.get("color", null)
+		if typeof(col_data) == TYPE_ARRAY and (col_data as Array).size() == 4:
+			var arr: Array = col_data
+			copy["color"] = Color(float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3]))
+		else:
+			copy["color"] = Color.WHITE
+		out.append(copy)
+	return out
+
+func _array_of_dicts(raw: Variant) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if typeof(raw) != TYPE_ARRAY:
+		return out
+	for entry in raw:
+		if typeof(entry) == TYPE_DICTIONARY:
+			out.append((entry as Dictionary).duplicate(true))
+	return out
+
+## Dictionary{int → int} round-trips through JSON as Dictionary{String →
+## int} (JSON object keys are always strings). Convert both ways here so
+## the rest of the sim can keep using ints.
+func _tree_at_tile_to_save() -> Dictionary:
+	var out: Dictionary = {}
+	for k in _tree_at_tile.keys():
+		out[str(int(k))] = int(_tree_at_tile[k])
+	return out
+
+func _tree_at_tile_from_save(raw: Variant) -> Dictionary:
+	var out: Dictionary = {}
+	if typeof(raw) != TYPE_DICTIONARY:
+		return out
+	for k in (raw as Dictionary).keys():
+		out[int(String(k))] = int((raw as Dictionary)[k])
+	return out
+
+func _int32_array_to_b64(arr: PackedInt32Array) -> String:
+	if arr.is_empty():
+		return ""
+	var pba := PackedByteArray()
+	pba.resize(arr.size() * 4)
+	for i in arr.size():
+		pba.encode_s32(i * 4, arr[i])
+	return Marshalls.raw_to_base64(pba)
+
+func _b64_to_int32_array(s: String) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	if s.is_empty():
+		return out
+	var pba := Marshalls.base64_to_raw(s)
+	if pba.size() % 4 != 0:
+		push_warning("[StubSim] tile_owner blob has unaligned length %d" % pba.size())
+		return out
+	out.resize(pba.size() / 4)
+	for i in out.size():
+		out[i] = pba.decode_s32(i * 4)
+	return out
+
+# ─────────────────────────────────────────────────────────────────────
 # World generation
 # ─────────────────────────────────────────────────────────────────────
 func _generate_world() -> void:
@@ -618,18 +771,21 @@ func _system_construction() -> void:
 		if transfer <= 0:
 			continue
 		stockpile.wood = int(stockpile.wood) - transfer
+		var prev_stage: int = int(b.stage)
 		b.wood_invested = int(b.wood_invested) + transfer
 		b.progress_days = int(b.wood_invested)
 		if b.progress_days >= STAGE_THRESHOLDS[3]:
 			if b.stage != BuildStage.COMPLETE:
 				b.stage = BuildStage.COMPLETE
-				_recent_events.append({"type": "building_complete", "id": b.id})
+				_recent_events.append({"type": "building_complete", "id": int(b.id), "x": int(b.tile_x), "y": int(b.tile_y), "civ_id": civ_id})
 		elif b.progress_days >= STAGE_THRESHOLDS[2]:
 			b.stage = BuildStage.ROOF
 		elif b.progress_days >= STAGE_THRESHOLDS[1]:
 			b.stage = BuildStage.WALLS
 		elif b.progress_days >= STAGE_THRESHOLDS[0]:
 			b.stage = BuildStage.FRAME
+		if int(b.stage) != prev_stage and int(b.stage) != BuildStage.COMPLETE:
+			_recent_events.append({"type": "building_progress", "id": int(b.id), "x": int(b.tile_x), "y": int(b.tile_y), "stage": int(b.stage), "civ_id": civ_id})
 
 func _system_building_request() -> void:
 	# Every 5 days, unhomed pairs try to build

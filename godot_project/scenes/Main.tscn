@@ -115,6 +115,26 @@ layout_mode = 2
 text = "zoom 1.0×"
 horizontal_alignment = 2
 
+[node name="Buttons" type="HBoxContainer" parent="HUD/TopBar/Bar/Right"]
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_constants/separation = 4
+
+[node name="Save" type="Button" parent="HUD/TopBar/Bar/Right/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Save"
+
+[node name="Load" type="Button" parent="HUD/TopBar/Bar/Right/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Load"
+
+[node name="Menu" type="Button" parent="HUD/TopBar/Bar/Right/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Menu"
+
 [node name="BottomBar" type="MarginContainer" parent="HUD"]
 anchors_preset = 12
 anchor_top = 1.0
@@ -218,3 +238,47 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "—"
+
+[node name="MinimapPanel" type="PanelContainer" parent="HUD"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -204.0
+offset_top = 44.0
+offset_right = -8.0
+offset_bottom = 184.0
+grow_horizontal = 0
+
+[node name="Margin" type="MarginContainer" parent="HUD/MinimapPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="Map" type="TextureRect" parent="HUD/MinimapPanel/Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(188, 132)
+expand_mode = 1
+stretch_mode = 5
+texture_filter = 1
+
+[node name="Toast" type="Label" parent="HUD"]
+unique_name_in_owner = true
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -120.0
+offset_top = -110.0
+offset_right = 120.0
+offset_bottom = -80.0
+grow_horizontal = 2
+grow_vertical = 0
+horizontal_alignment = 1
+vertical_alignment = 1
+text = ""
+theme_override_font_sizes/font_size = 14
+modulate = Color(1, 1, 1, 0)
