@@ -21,14 +21,14 @@ const BIOME_TEXTURES := [
 ]
 
 const BIOME_BASE_ELEV := [
-	-0.8,   # Ocean
-	-0.05,  # Coast
+	-0.4,   # Ocean
+	-0.02,  # Coast
 	0.0,    # Plains
-	0.15,   # Forest
-	0.6,    # Hills
-	1.8,    # Mountain — tall peaks
-	0.05,   # Desert
-	0.2,    # Tundra
+	0.08,   # Forest
+	0.3,    # Hills
+	0.8,    # Mountain
+	0.03,   # Desert
+	0.1,    # Tundra
 ]
 
 const CIV_COLORS := [
@@ -43,13 +43,16 @@ var _dims: Vector2i = Vector2i.ZERO
 var _entity_root: Node3D
 var _npc_sprites: Dictionary = {}
 var _building_sprites: Dictionary = {}
+var _tree_sprites: Array[Sprite3D] = []
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
-var _smooth_elev: PackedFloat32Array  ## Pre-computed smoothed elevation per tile.
+var _tree_texture: Texture2D
+var _smooth_elev: PackedFloat32Array
 
 func _ready() -> void:
 	_npc_texture = load("res://assets/npcs/default/walk_south.png") as Texture2D
 	_building_texture = load("res://assets/buildings/default/house.png") as Texture2D
+	_tree_texture = load("res://assets/decorations/tree_pine/tree_pine.png") as Texture2D
 	_entity_root = Node3D.new()
 	_entity_root.name = "Entities"
 	add_child(_entity_root)
@@ -93,10 +96,10 @@ func _precompute_smooth_elevation() -> void:
 			var raw_elev: int = _state.tile_elevation(q, r)
 			raw[r * _dims.x + q] = BIOME_BASE_ELEV[biome] + float(raw_elev) * ELEV_SCALE
 
-	# Two-pass Gaussian-like smooth for realistic terrain
+	# Multi-pass smooth for very gentle terrain transitions
 	_smooth_elev = PackedFloat32Array()
 	_smooth_elev.resize(_dims.x * _dims.y)
-	for pass_i in 2:
+	for pass_i in 4:
 		var src: PackedFloat32Array = raw if pass_i == 0 else _smooth_elev.duplicate()
 		for r in _dims.y:
 			for q in _dims.x:
@@ -130,11 +133,13 @@ func _get_smooth_elevation(q: int, r: int) -> float:
 		return -0.8
 	return _smooth_elev[r * _dims.x + q]
 
+const HEX_CORNER_SCALE := 1.06  ## Overlap to close gaps between hexes.
+
 func _hex_corner_smooth(center_q: int, center_r: int, center_pos: Vector3, i: int) -> Vector3:
 	var angle_deg: float = 60.0 * i
 	var angle_rad: float = deg_to_rad(angle_deg)
-	var corner_x: float = center_pos.x + HEX_SIZE * cos(angle_rad)
-	var corner_z: float = center_pos.z + HEX_SIZE * sin(angle_rad)
+	var corner_x: float = center_pos.x + HEX_SIZE * HEX_CORNER_SCALE * cos(angle_rad)
+	var corner_z: float = center_pos.z + HEX_SIZE * HEX_CORNER_SCALE * sin(angle_rad)
 	# Average elevation between center and adjacent hex for smooth edges
 	var adj := _hex_neighbors(center_q, center_r)
 	var corner_y: float = center_pos.y
@@ -229,27 +234,77 @@ func _build_terrain() -> void:
 		add_child(mi)
 
 	_add_water_plane()
+	_place_trees()
 	print("[HexGrid] Terrain built.")
 
 func _add_water_plane() -> void:
-	var water_mat := StandardMaterial3D.new()
-	water_mat.albedo_color = Color(0.12, 0.30, 0.55, 0.75)
-	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	water_mat.roughness = 0.2
-	water_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-
 	var max_x: float = HEX_SIZE * 1.5 * _dims.x + HEX_SIZE
 	var max_z: float = HEX_SIZE * SQRT3 * _dims.y + HEX_SIZE
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(max_x * 1.2, max_z * 1.2)
-	plane.material = water_mat
 
-	var mi := MeshInstance3D.new()
-	mi.mesh = plane
-	mi.name = "WaterPlane"
-	mi.position = Vector3(max_x * 0.5, -0.2, max_z * 0.5)
-	add_child(mi)
+	# Ground plane: fills gaps between hex tiles with terrain-like color
+	var ground_mat := StandardMaterial3D.new()
+	ground_mat.albedo_color = Color(0.45, 0.55, 0.30, 1.0)
+	ground_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	ground_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	ground_mat.roughness = 1.0
+	ground_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var ground_plane := PlaneMesh.new()
+	ground_plane.size = Vector2(max_x * 1.2, max_z * 1.2)
+	ground_plane.material = ground_mat
+
+	var ground_mi := MeshInstance3D.new()
+	ground_mi.mesh = ground_plane
+	ground_mi.name = "GroundPlane"
+	ground_mi.position = Vector3(max_x * 0.5, -0.5, max_z * 0.5)
+	add_child(ground_mi)
+
+	# Water plane: only visible in deep ocean areas
+	var water_mat := StandardMaterial3D.new()
+	water_mat.albedo_color = Color(0.10, 0.28, 0.52, 1.0)
+	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	water_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	water_mat.roughness = 0.3
+	water_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var water_plane := PlaneMesh.new()
+	water_plane.size = Vector2(max_x * 1.2, max_z * 1.2)
+	water_plane.material = water_mat
+
+	var water_mi := MeshInstance3D.new()
+	water_mi.mesh = water_plane
+	water_mi.name = "WaterPlane"
+	water_mi.position = Vector3(max_x * 0.5, -0.45, max_z * 0.5)
+	add_child(water_mi)
+
+func _place_trees() -> void:
+	if not _tree_texture:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 42
+	# Place trees on forest (3) and hills (4) biomes
+	for r in _dims.y:
+		for q in _dims.x:
+			var biome: int = clampi(_state.tile_biome(q, r), 0, 7)
+			if biome != 3 and biome != 4:
+				continue
+			# ~30% chance on forest, ~10% on hills
+			var chance: float = 0.30 if biome == 3 else 0.10
+			if rng.randf() > chance:
+				continue
+			var sprite := Sprite3D.new()
+			sprite.texture = _tree_texture
+			sprite.pixel_size = 0.02 + rng.randf() * 0.008
+			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+			sprite.transparent = true
+			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+			var pos: Vector3 = hex_center(q, r)
+			var ox: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
+			var oz: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
+			sprite.position = Vector3(pos.x + ox, pos.y + 0.35, pos.z + oz)
+			_entity_root.add_child(sprite)
+			_tree_sprites.append(sprite)
 
 # ─── Entity rendering ───────────────────────────────────────────────
 func _update_npcs() -> void:
@@ -271,7 +326,7 @@ func _update_npcs() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _npc_texture
 			sprite.hframes = 6
-			sprite.pixel_size = 0.03
+			sprite.pixel_size = 0.021
 			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
@@ -285,9 +340,9 @@ func _update_npcs() -> void:
 		sprite.position = Vector3(pos.x, pos.y + 0.5, pos.z)
 
 		if npc.is_child:
-			sprite.pixel_size = 0.022
+			sprite.pixel_size = 0.015
 		else:
-			sprite.pixel_size = 0.03
+			sprite.pixel_size = 0.021
 
 		var frame_idx: int = (Engine.get_frames_drawn() / 8 + int(npc.id)) % 6
 		sprite.frame = frame_idx
@@ -313,34 +368,30 @@ func _update_buildings() -> void:
 		else:
 			sprite = Sprite3D.new()
 			sprite.texture = _building_texture
-			sprite.pixel_size = 0.05
-			# Buildings anchored — no billboard, fixed on hex
-			sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+			sprite.pixel_size = 0.035
+			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-			sprite.axis = Vector3.AXIS_Y
 			_entity_root.add_child(sprite)
 			_building_sprites[bld.id] = sprite
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, pos.y + 0.4, pos.z)
-		# Face south (fixed rotation, not following camera)
-		sprite.rotation_degrees = Vector3(-90, 0, 0)
 
 		var stage: int = bld.stage
 		if stage == 4:
 			sprite.modulate = Color(1, 1, 1, 1)
-			sprite.pixel_size = 0.05
+			sprite.pixel_size = 0.035
 		elif stage == 3:
 			sprite.modulate = Color(0.9, 0.9, 0.9, 0.95)
-			sprite.pixel_size = 0.045
+			sprite.pixel_size = 0.032
 		elif stage == 2:
 			sprite.modulate = Color(0.7, 0.7, 0.7, 0.85)
-			sprite.pixel_size = 0.04
+			sprite.pixel_size = 0.028
 		elif stage == 1:
 			sprite.modulate = Color(0.6, 0.6, 0.5, 0.7)
-			sprite.pixel_size = 0.03
+			sprite.pixel_size = 0.021
 		else:
 			sprite.modulate = Color(0.5, 0.5, 0.4, 0.5)
-			sprite.pixel_size = 0.02
+			sprite.pixel_size = 0.014
