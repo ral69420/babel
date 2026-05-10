@@ -65,6 +65,14 @@ var _building_texture: Texture2D
 var _tree_texture: Texture2D
 var _smooth_elev: PackedFloat32Array
 
+# Territory overlay
+var _territory_root: Node3D
+var _territory_visible: bool = true
+var _last_territory_version: int = -1
+const TERRITORY_Y_OFFSET := 0.06
+const TERRITORY_INTERIOR_ALPHA := 0.22
+const TERRITORY_BORDER_ALPHA := 0.65
+
 func _ready() -> void:
 	_npc_texture = load("res://assets/npcs/default/walk_south.png") as Texture2D
 	_building_texture = load("res://assets/buildings/default/house.png") as Texture2D
@@ -72,6 +80,9 @@ func _ready() -> void:
 	_entity_root = Node3D.new()
 	_entity_root.name = "Entities"
 	add_child(_entity_root)
+	_territory_root = Node3D.new()
+	_territory_root.name = "Territory"
+	add_child(_territory_root)
 
 func bind(state: Node) -> void:
 	_state = state
@@ -101,6 +112,15 @@ func update_entities() -> void:
 	_update_npcs()
 	_update_buildings()
 	_update_trees()
+	_maybe_rebuild_territory()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		var k: InputEventKey = event
+		if k.keycode == KEY_T:
+			_territory_visible = not _territory_visible
+			if _territory_root:
+				_territory_root.visible = _territory_visible
 
 # ─── Smooth elevation ────────────────────────────────────────────────
 func _precompute_smooth_elevation() -> void:
@@ -486,3 +506,128 @@ func _update_buildings() -> void:
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, _ground_anchor_y(pos.y, HOUSE_TEX_H, sprite.pixel_size), pos.z)
+
+# ─── Territory overlay ──────────────────────────────────────────────────────
+## Compares the sim's [territory_version] against our last cached value.
+## Only does a full mesh rebuild when the sim has actually recomputed
+## ownership (typically every TERRITORY_RECOMPUTE_DAYS sim-days).
+func _maybe_rebuild_territory() -> void:
+	if not _state.has_method("territory_version"):
+		return
+	var v: int = int(_state.territory_version())
+	if v == _last_territory_version:
+		return
+	_last_territory_version = v
+	_rebuild_territory()
+
+## Border-detection helper. A tile is on the border of its civ's
+## territory if any of its hex neighbours is owned by a different civ
+## (or unowned, or off-map).
+func _is_border_for(q: int, r: int, civ_id: int) -> bool:
+	var nb := _hex_neighbors(q, r)
+	for n in nb:
+		if n.x < 0 or n.y < 0 or n.x >= _dims.x or n.y >= _dims.y:
+			return true
+		if int(_state.tile_owner(n.x, n.y)) != civ_id:
+			return true
+	return false
+
+func _make_overlay_material(rgb: Color, alpha: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(rgb.r, rgb.g, rgb.b, alpha)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_BACK
+	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	# Keep default depth-draw (opaque-only) so trees / NPCs drawn over
+	# the overlay still depth-test correctly, and the overlay itself
+	# doesn't occlude what's above it.
+	return m
+
+func _rebuild_territory() -> void:
+	if _territory_root == null or _state == null:
+		return
+	for c in _territory_root.get_children():
+		c.queue_free()
+
+	var civs_arr: Array = _state.get_civs()
+	if civs_arr.is_empty():
+		return
+
+	# Collect per-civ tile lists in a single map pass, splitting into
+	# border vs interior up front so the per-civ mesh build is linear.
+	var civ_count: int = civs_arr.size()
+	var interior_tiles: Array = []
+	var border_tiles: Array = []
+	for _i in civ_count:
+		interior_tiles.append([])
+		border_tiles.append([])
+
+	for r in _dims.y:
+		for q in _dims.x:
+			var owner: int = int(_state.tile_owner(q, r))
+			if owner < 0 or owner >= civ_count:
+				continue
+			if _is_border_for(q, r, owner):
+				(border_tiles[owner] as Array).append(Vector2i(q, r))
+			else:
+				(interior_tiles[owner] as Array).append(Vector2i(q, r))
+
+	for civ_id in civ_count:
+		var civ: Dictionary = civs_arr[civ_id]
+		var col: Color = civ.color
+		var iv := _build_overlay_verts(interior_tiles[civ_id])
+		if iv.size() > 0:
+			_territory_root.add_child(_make_overlay_instance(
+				iv, _make_overlay_material(col, TERRITORY_INTERIOR_ALPHA),
+				"Civ%d_Interior" % civ_id,
+			))
+		var bv := _build_overlay_verts(border_tiles[civ_id])
+		if bv.size() > 0:
+			_territory_root.add_child(_make_overlay_instance(
+				bv, _make_overlay_material(col, TERRITORY_BORDER_ALPHA),
+				"Civ%d_Border" % civ_id,
+			))
+	_territory_root.visible = _territory_visible
+
+func _build_overlay_verts(tiles: Array) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	out.resize(tiles.size() * 18)   # 6 fan triangles × 3 verts per tile
+	var i: int = 0
+	for t in tiles:
+		var coords: Vector2i = t
+		var center: Vector3 = hex_center(coords.x, coords.y)
+		center.y += TERRITORY_Y_OFFSET
+		var corners: Array[Vector3] = []
+		for k in 6:
+			var c: Vector3 = _hex_corner_smooth(coords.x, coords.y, hex_center(coords.x, coords.y), k)
+			c.y += TERRITORY_Y_OFFSET
+			corners.append(c)
+		for k in 6:
+			var nxt: int = (k + 1) % 6
+			out[i] = center
+			i += 1
+			out[i] = corners[k]
+			i += 1
+			out[i] = corners[nxt]
+			i += 1
+	return out
+
+func _make_overlay_instance(verts: PackedVector3Array, mat: Material, mesh_name: String) -> MeshInstance3D:
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = verts
+	# Flat overlay → all normals up; lets unshaded material short-circuit
+	# but fills the array so the shader doesn't complain.
+	var normals := PackedVector3Array()
+	normals.resize(verts.size())
+	for i in verts.size():
+		normals[i] = Vector3.UP
+	arr[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	mesh.surface_set_material(0, mat)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.name = mesh_name
+	return mi

@@ -161,3 +161,13 @@ func civ_wood(civ_id: int) -> int:
 	if _society and _society.has_method("civ_wood"):
 		return _society.civ_wood(civ_id)
 	return 0
+
+func tile_owner(x: int, y: int) -> int:
+	if _society and _society.has_method("tile_owner"):
+		return _society.tile_owner(x, y)
+	return -1
+
+func territory_version() -> int:
+	if _society and _society.has_method("territory_version"):
+		return _society.territory_version()
+	return 0
