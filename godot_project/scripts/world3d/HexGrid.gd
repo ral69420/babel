@@ -40,6 +40,22 @@ const BIOME_TEXTURES := [
 	"res://assets/tiles/plains/plains.png",  # was tundra — now plains fallback
 ]
 
+## Channel index (0..3) inside the per-vertex weight Color (R,G,B,A) for
+## the four "land" biomes used by the merged-terrain shader.
+## Ocean is implicit: ocean_weight = max(0, 1 - sum(other weights)).
+## All non-listed enum slots (legacy Coast / Desert / Tundra) fall back
+## to plains so the world keeps rendering even on legacy save files.
+const BIOME_WEIGHT_CHANNEL := {
+	0: -1,   # Ocean (implicit / 5th channel)
+	1: 0,    # Coast slot → plains channel
+	2: 0,    # Plains
+	3: 1,    # Forest
+	4: 2,    # Hills
+	5: 3,    # Mountain
+	6: 0,    # Desert slot → plains channel
+	7: 0,    # Tundra slot → plains channel
+}
+
 const BIOME_BASE_ELEV := [
 	-0.4,   # Ocean
 	0.0,    # (legacy Coast slot) → plains elevation
@@ -83,6 +99,8 @@ var _tree_texture: Texture2D
 ## sprite happens to read fine as a small green flake.
 var _grass_texture: Texture2D
 var _vegetation_shader: Shader
+var _terrain_shader: Shader
+var _terrain_material: ShaderMaterial
 var _tree_wind_material: ShaderMaterial
 var _leaves_particles: GPUParticles3D
 var _smooth_elev: PackedFloat32Array
@@ -101,7 +119,9 @@ func _ready() -> void:
 	_tree_texture = load("res://assets/decorations/tree_pine/tree_pine.png") as Texture2D
 	_grass_texture = load("res://assets/decorations/grass/grass.png") as Texture2D
 	_vegetation_shader = load("res://shaders/vegetation_wind.gdshader") as Shader
+	_terrain_shader = load("res://shaders/terrain_blend.gdshader") as Shader
 	_tree_wind_material = _make_wind_material(_tree_texture, 0.04, 0.7, 0.4)
+	_terrain_material = _make_terrain_material()
 	_entity_root = Node3D.new()
 	_entity_root.name = "Entities"
 	add_child(_entity_root)
@@ -126,6 +146,19 @@ func _make_wind_material(
 	mat.set_shader_parameter("wind_speed", speed)
 	mat.set_shader_parameter("wind_jitter", jitter)
 	mat.set_shader_parameter("alpha_cutoff", 0.5)
+	return mat
+
+## Build the single shared ShaderMaterial used by the merged terrain
+## mesh. Loads each biome's texture once and binds it to the
+## corresponding sampler uniform on the [terrain_blend] shader.
+func _make_terrain_material() -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = _terrain_shader
+	mat.set_shader_parameter("tex_plains",   load("res://assets/tiles/plains/plains.png"))
+	mat.set_shader_parameter("tex_forest",   load("res://assets/tiles/forest/forest.png"))
+	mat.set_shader_parameter("tex_hills",    load("res://assets/tiles/hills/hills.png"))
+	mat.set_shader_parameter("tex_mountain", load("res://assets/tiles/mountain/mountain.png"))
+	mat.set_shader_parameter("tex_ocean",    load("res://assets/tiles/ocean/ocean.png"))
 	return mat
 
 func bind(state: Node) -> void:
@@ -249,7 +282,11 @@ func _get_smooth_elevation(q: int, r: int) -> float:
 func _ground_anchor_y(ground_y: float, tex_h_px: float, pixel_size_world: float) -> float:
 	return ground_y + tex_h_px * pixel_size_world * 0.5 + GROUND_BIAS
 
-const HEX_CORNER_SCALE := 1.06  ## Overlap to close gaps between hexes.
+## Overlap to close gaps between hexes. With the merged single-mesh
+## terrain we no longer need an overlap to mask seams (vertices are
+## shared), but a small (>=1.0) overlap still helps with floating-point
+## quantisation on very large maps. 1.0 = exact hex tiling.
+const HEX_CORNER_SCALE := 1.0
 
 func _hex_corner_smooth(center_q: int, center_r: int, center_pos: Vector3, i: int) -> Vector3:
 	var angle_deg: float = 60.0 * i
@@ -271,28 +308,67 @@ func _hex_corner_smooth(center_q: int, center_r: int, center_pos: Vector3, i: in
 	return Vector3(corner_x, corner_y, corner_z)
 
 # ─── Terrain mesh generation ────────────────────────────────────────
+#
+# Single merged ArrayMesh with one surface and one ShaderMaterial:
+# adjacent hexes share corner vertex POSITIONS (no seams / cracks) and
+# vertex COLORS encode per-biome blend weights. The terrain_blend
+# shader samples all biome textures and blends them via vertex colour
+# interpolation, so biome boundaries fade smoothly across triangles.
+#
+# Why this matters: the previous implementation used N separate
+# MeshInstance3D nodes (one per biome) that lined up only by
+# floating-point luck — at biome boundaries you could see hairline
+# gaps and hard colour borders. With one mesh the gap problem
+# disappears by construction.
+##
+## R = plains, G = forest, B = hills, A = mountain, ocean implicit.
+func _biome_weight_color(biome: int) -> Color:
+	if BIOME_WEIGHT_CHANNEL.has(biome):
+		var ch: int = BIOME_WEIGHT_CHANNEL[biome]
+		match ch:
+			0: return Color(1.0, 0.0, 0.0, 0.0)   # plains
+			1: return Color(0.0, 1.0, 0.0, 0.0)   # forest
+			2: return Color(0.0, 0.0, 1.0, 0.0)   # hills
+			3: return Color(0.0, 0.0, 0.0, 1.0)   # mountain
+			-1: return Color(0.0, 0.0, 0.0, 0.0)  # ocean (5th, implicit)
+	return Color(1.0, 0.0, 0.0, 0.0)
+
+## Average biome weights of the three hexes that meet at this corner.
+## Returns the blended Color used as the corner vertex's COLOR attribute.
+func _corner_weight_color(q: int, r: int, i: int) -> Color:
+	var adj := _hex_neighbors(q, r)
+	var n1_idx: int = i % 6
+	var n2_idx: int = (i + 5) % 6
+	var biomes: Array[int] = []
+	biomes.append(int(_state.tile_biome(q, r)))
+	if n1_idx < adj.size():
+		var n1: Vector2i = adj[n1_idx]
+		if n1.x >= 0 and n1.y >= 0 and n1.x < _dims.x and n1.y < _dims.y:
+			biomes.append(int(_state.tile_biome(n1.x, n1.y)))
+	if n2_idx < adj.size():
+		var n2: Vector2i = adj[n2_idx]
+		if n2.x >= 0 and n2.y >= 0 and n2.x < _dims.x and n2.y < _dims.y:
+			biomes.append(int(_state.tile_biome(n2.x, n2.y)))
+	var sum := Color(0.0, 0.0, 0.0, 0.0)
+	for b in biomes:
+		var c: Color = _biome_weight_color(b)
+		sum = Color(sum.r + c.r, sum.g + c.g, sum.b + c.b, sum.a + c.a)
+	var inv: float = 1.0 / float(biomes.size())
+	return Color(sum.r * inv, sum.g * inv, sum.b * inv, sum.a * inv)
+
 func _build_terrain() -> void:
-	print("[HexGrid] Building 3D terrain %d×%d..." % [_dims.x, _dims.y])
+	print("[HexGrid] Building merged 3D terrain %d×%d (single draw call)..." % [_dims.x, _dims.y])
 
-	var biome_materials: Array[StandardMaterial3D] = []
-	for i in BIOME_TEXTURES.size():
-		var mat := StandardMaterial3D.new()
-		var tex := load(BIOME_TEXTURES[i]) as Texture2D
-		mat.albedo_texture = tex
-		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-		mat.vertex_color_use_as_albedo = false
-		mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-		mat.roughness = 1.0
-		biome_materials.append(mat)
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
 
-	var biome_verts: Array = []
-	var biome_uvs: Array = []
-	var biome_normals: Array = []
-	for _i in BIOME_TEXTURES.size():
-		biome_verts.append(PackedVector3Array())
-		biome_uvs.append(PackedVector2Array())
-		biome_normals.append(PackedVector3Array())
+	var tri_count: int = _dims.x * _dims.y * 6
+	verts.resize(tri_count * 3)
+	uvs.resize(tri_count * 3)
+	normals.resize(tri_count * 3)
+	colors.resize(tri_count * 3)
 
 	var uv_center := Vector2(0.5, 0.5)
 	var uv_corners: Array[Vector2] = []
@@ -300,81 +376,77 @@ func _build_terrain() -> void:
 		var angle: float = deg_to_rad(60.0 * i)
 		uv_corners.append(Vector2(0.5 + 0.5 * cos(angle), 0.5 + 0.5 * sin(angle)))
 
+	var idx: int = 0
 	for r in _dims.y:
 		for q in _dims.x:
 			var biome: int = clampi(_state.tile_biome(q, r), 0, BIOME_TEXTURES.size() - 1)
 			var center: Vector3 = hex_to_world(q, r)
+			var center_color: Color = _biome_weight_color(biome)
+
 			var corners: Array[Vector3] = []
+			var corner_colors: Array[Color] = []
 			for i in 6:
 				corners.append(_hex_corner_smooth(q, r, center, i))
+				corner_colors.append(_corner_weight_color(q, r, i))
 
 			for i in 6:
-				var next: int = (i + 1) % 6
+				var nxt: int = (i + 1) % 6
 				var v0: Vector3 = center
 				var v1: Vector3 = corners[i]
-				var v2: Vector3 = corners[next]
-				# Compute proper face normal
+				var v2: Vector3 = corners[nxt]
 				var edge1: Vector3 = v1 - v0
 				var edge2: Vector3 = v2 - v0
 				var normal: Vector3 = edge1.cross(edge2).normalized()
 				if normal.y < 0:
 					normal = -normal
 
-				biome_verts[biome].append(v0)
-				biome_verts[biome].append(v1)
-				biome_verts[biome].append(v2)
-				biome_uvs[biome].append(uv_center)
-				biome_uvs[biome].append(uv_corners[i])
-				biome_uvs[biome].append(uv_corners[next])
-				biome_normals[biome].append(normal)
-				biome_normals[biome].append(normal)
-				biome_normals[biome].append(normal)
+				verts[idx] = v0
+				uvs[idx] = uv_center
+				normals[idx] = normal
+				colors[idx] = center_color
+				idx += 1
+				verts[idx] = v1
+				uvs[idx] = uv_corners[i]
+				normals[idx] = normal
+				colors[idx] = corner_colors[i]
+				idx += 1
+				verts[idx] = v2
+				uvs[idx] = uv_corners[nxt]
+				normals[idx] = normal
+				colors[idx] = corner_colors[nxt]
+				idx += 1
 
-	for i in BIOME_TEXTURES.size():
-		var verts: PackedVector3Array = biome_verts[i]
-		if verts.size() == 0:
-			continue
-		var arr := []
-		arr.resize(Mesh.ARRAY_MAX)
-		arr[Mesh.ARRAY_VERTEX] = verts
-		arr[Mesh.ARRAY_NORMAL] = biome_normals[i]
-		arr[Mesh.ARRAY_TEX_UV] = biome_uvs[i]
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = verts
+	arr[Mesh.ARRAY_TEX_UV] = uvs
+	arr[Mesh.ARRAY_NORMAL] = normals
+	arr[Mesh.ARRAY_COLOR] = colors
 
-		var mesh := ArrayMesh.new()
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-		mesh.surface_set_material(0, biome_materials[i])
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	mesh.surface_set_material(0, _terrain_material)
 
-		var mi := MeshInstance3D.new()
-		mi.mesh = mesh
-		mi.name = "Biome_%d" % i
-		add_child(mi)
+	# Replace any prior terrain MeshInstance left by an older build.
+	var prev: Node = get_node_or_null("Terrain")
+	if prev:
+		prev.queue_free()
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.name = "Terrain"
+	add_child(mi)
 
 	_add_water_plane()
-	print("[HexGrid] Terrain built.")
+	print("[HexGrid] Terrain built: %d triangles, 1 draw call." % tri_count)
 
+## Optional water plane sitting just below the terrain ocean tiles —
+## adds depth to the deep-water reads. The merged terrain mesh already
+## paints ocean tiles using the ocean texture, so this is a backdrop
+## only; we no longer need a "ground plane" gap-filler underneath.
 func _add_water_plane() -> void:
 	var max_x: float = HEX_SIZE * 1.5 * _dims.x + HEX_SIZE
 	var max_z: float = HEX_SIZE * SQRT3 * _dims.y + HEX_SIZE
 
-	# Ground plane: fills gaps between hex tiles with terrain-like color
-	var ground_mat := StandardMaterial3D.new()
-	ground_mat.albedo_color = Color(0.45, 0.55, 0.30, 1.0)
-	ground_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-	ground_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	ground_mat.roughness = 1.0
-	ground_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-
-	var ground_plane := PlaneMesh.new()
-	ground_plane.size = Vector2(max_x * 1.2, max_z * 1.2)
-	ground_plane.material = ground_mat
-
-	var ground_mi := MeshInstance3D.new()
-	ground_mi.mesh = ground_plane
-	ground_mi.name = "GroundPlane"
-	ground_mi.position = Vector3(max_x * 0.5, -0.5, max_z * 0.5)
-	add_child(ground_mi)
-
-	# Water plane: only visible in deep ocean areas
 	var water_mat := StandardMaterial3D.new()
 	water_mat.albedo_color = Color(0.10, 0.28, 0.52, 1.0)
 	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
@@ -386,10 +458,13 @@ func _add_water_plane() -> void:
 	water_plane.size = Vector2(max_x * 1.2, max_z * 1.2)
 	water_plane.material = water_mat
 
+	var prev: Node = get_node_or_null("WaterPlane")
+	if prev:
+		prev.queue_free()
 	var water_mi := MeshInstance3D.new()
 	water_mi.mesh = water_plane
 	water_mi.name = "WaterPlane"
-	water_mi.position = Vector3(max_x * 0.5, -0.45, max_z * 0.5)
+	water_mi.position = Vector3(max_x * 0.5, -0.5, max_z * 0.5)
 	add_child(water_mi)
 
 ## Pixel-size used for an ADULT tree. Younger stages scale down off this.

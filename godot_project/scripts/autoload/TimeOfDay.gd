@@ -162,10 +162,10 @@ const _FOG_BASE_HEIGHT_M: float = 2.5      ## Just above the highest terrain pea
 ## Negative on purpose: in Godot 4, negative fog_height_density makes
 ## fog density increase *above* fog_height (high-altitude haze) instead
 ## of below (ground fog).
-const _FOG_HEIGHT_DENSITY_MAX: float = -0.06
-const _FOG_DEPTH_DENSITY_MAX: float = 0.010
-const _FOG_ZOOM_START: float = 60.0        ## Distance where fog begins to appear.
-const _FOG_ZOOM_FULL: float = 220.0        ## Distance at which fog reaches max.
+const _FOG_HEIGHT_DENSITY_MAX: float = -0.020
+const _FOG_DEPTH_DENSITY_MAX: float = 0.003
+const _FOG_ZOOM_START: float = 110.0       ## Distance where fog begins to appear.
+const _FOG_ZOOM_FULL: float = 240.0        ## Distance at which fog reaches max.
 
 func _apply_camera_distance_fog(env: Environment) -> void:
 	if _camera_node == null:
