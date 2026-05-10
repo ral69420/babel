@@ -15,10 +15,12 @@ const BIOME_TILE_PATHS := [
 ]
 
 const CIV_COLORS := [
-	Color(1.0, 0.5, 0.5),   # Civ 0 — red tint
-	Color(0.5, 0.7, 1.0),   # Civ 1 — blue tint
-	Color(0.5, 1.0, 0.6),   # Civ 2 — green tint
-	Color(1.0, 0.9, 0.4),   # Civ 3 — yellow tint
+	Color(1.00, 0.50, 0.50),  # Civ 0 — red
+	Color(0.50, 0.70, 1.00),  # Civ 1 — blue
+	Color(0.55, 1.00, 0.60),  # Civ 2 — green
+	Color(1.00, 0.90, 0.40),  # Civ 3 — yellow
+	Color(0.85, 0.55, 1.00),  # Civ 4 — purple
+	Color(1.00, 0.65, 0.30),  # Civ 5 — orange
 ]
 
 var _state: Node = null

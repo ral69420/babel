@@ -6,10 +6,25 @@ extends Node
 ## without compiling the Rust backend.
 
 # ── World parameters ─────────────────────────────────────────────────
-const MAP_W := 256
-const MAP_H := 256
+const DEFAULT_MAP_W := 256
+const DEFAULT_MAP_H := 256
 const TICK_RATE := 6          # ticks per sim-day
 const DAYS_PER_YEAR := 360
+
+## 6 civ colour slots (more than the historical 4) so the new-game civ
+## count slider can go up to 6 without rendering using out-of-range
+## indices. HexGrid / WorldView read from this same palette.
+const CIV_PALETTE: Array[Color] = [
+	Color(1.00, 0.50, 0.50),  # red
+	Color(0.50, 0.70, 1.00),  # blue
+	Color(0.55, 1.00, 0.60),  # green
+	Color(1.00, 0.90, 0.40),  # yellow
+	Color(0.85, 0.55, 1.00),  # purple
+	Color(1.00, 0.65, 0.30),  # orange
+]
+
+var map_w: int = DEFAULT_MAP_W
+var map_h: int = DEFAULT_MAP_H
 
 # ── Biome IDs (must match WorldView) ─────────────────────────────────
 enum Biome { OCEAN, COAST, PLAINS, FOREST, HILLS, MOUNTAIN, DESERT, TUNDRA }
@@ -37,6 +52,17 @@ var next_npc_id: int = 0
 var buildings: Array[Dictionary] = []
 var next_building_id: int = 0
 
+# ── Civilizations ────────────────────────────────────────────────────
+## Each entry: { id, name, color, spawn_x, spawn_y }. Populated during
+## [_spawn_initial_civs]. Exposed via [GameState.get_civs] for the menu /
+## civ-select scene and for the in-game HUD.
+var civs: Array[Dictionary] = []
+
+## True once [start] has run for the current process. Lets the menu flow
+## generate the world ahead of time and lets Main.tscn skip a redundant
+## restart.
+var world_started: bool = false
+
 # ── Recent events for chronicle ──────────────────────────────────────
 var _recent_events: Array[Dictionary] = []
 
@@ -44,34 +70,54 @@ var _recent_events: Array[Dictionary] = []
 var _rng := RandomNumberGenerator.new()
 
 # ─────────────────────────────────────────────────────────────────────
-func start(seed_val: int, _w: int, _h: int) -> bool:
+func start(seed_val: int, w: int = DEFAULT_MAP_W, h: int = DEFAULT_MAP_H, civ_count: int = 4) -> bool:
+	map_w = max(64, w)
+	map_h = max(64, h)
 	_seed_value = seed_val
 	_rng.seed = seed_val
-	_biomes.resize(MAP_W * MAP_H)
-	_elevation.resize(MAP_W * MAP_H)
-	_tags.resize(MAP_W * MAP_H)
+	npcs.clear()
+	buildings.clear()
+	civs.clear()
+	next_npc_id = 0
+	next_building_id = 0
+	_ticks = 0
+	_biomes.resize(map_w * map_h)
+	_elevation.resize(map_w * map_h)
+	_tags.resize(map_w * map_h)
 	_generate_world()
-	_spawn_initial_civs()
-	print("[StubSim] World started. NPCs: %d, Buildings: %d" % [npcs.size(), buildings.size()])
+	_spawn_initial_civs(civ_count)
+	world_started = true
+	print(
+		"[StubSim] World started. %dx%d, %d civs, NPCs: %d, Buildings: %d"
+		% [map_w, map_h, civs.size(), npcs.size(), buildings.size()]
+	)
 	return true
 
 func dims() -> Vector2i:
-	return Vector2i(MAP_W, MAP_H)
+	return Vector2i(map_w, map_h)
 
 func tile_biome(x: int, y: int) -> int:
-	if x < 0 or y < 0 or x >= MAP_W or y >= MAP_H:
+	if x < 0 or y < 0 or x >= map_w or y >= map_h:
 		return 0
-	return _biomes[y * MAP_W + x]
+	return _biomes[y * map_w + x]
 
 func tile_elevation(x: int, y: int) -> int:
-	if x < 0 or y < 0 or x >= MAP_W or y >= MAP_H:
+	if x < 0 or y < 0 or x >= map_w or y >= map_h:
 		return 0
-	return _elevation[y * MAP_W + x]
+	return _elevation[y * map_w + x]
 
 func tile_tags(x: int, y: int) -> int:
-	if x < 0 or y < 0 or x >= MAP_W or y >= MAP_H:
+	if x < 0 or y < 0 or x >= map_w or y >= map_h:
 		return 0
-	return _tags[y * MAP_W + x]
+	return _tags[y * map_w + x]
+
+func get_civs() -> Array:
+	return civs
+
+func civ_color(civ_id: int) -> Color:
+	if civ_id < 0 or civ_id >= civs.size():
+		return Color(0.7, 0.7, 0.7)
+	return civs[civ_id].color
 
 func advance(frame_ticks: int) -> int:
 	var total := frame_ticks * _time_scale
@@ -135,12 +181,12 @@ func _generate_world() -> void:
 	noise_moist.frequency = 0.010
 	noise_moist.fractal_octaves = 3
 
-	for y in MAP_H:
-		for x in MAP_W:
-			var idx := y * MAP_W + x
+	for y in map_h:
+		for x in map_w:
+			var idx := y * map_w + x
 			# Island shape — fade to ocean at edges
-			var dx := (float(x) / MAP_W - 0.5) * 2.0
-			var dy := (float(y) / MAP_H - 0.5) * 2.0
+			var dx := (float(x) / map_w - 0.5) * 2.0
+			var dy := (float(y) / map_h - 0.5) * 2.0
 			var dist := sqrt(dx * dx + dy * dy)
 			var e := (noise_elev.get_noise_2d(x, y) + 1.0) * 0.5
 			e -= dist * 0.7
@@ -171,6 +217,8 @@ func _generate_world() -> void:
 			_tags[idx] = 0
 
 func _is_walkable(x: int, y: int) -> bool:
+	if x < 0 or y < 0 or x >= map_w or y >= map_h:
+		return false
 	var b := tile_biome(x, y)
 	return b != Biome.OCEAN and b != Biome.MOUNTAIN
 
@@ -189,35 +237,44 @@ func _tile_occupied_by_building(x: int, y: int) -> bool:
 # ─────────────────────────────────────────────────────────────────────
 # Initial spawning
 # ─────────────────────────────────────────────────────────────────────
-func _spawn_initial_civs() -> void:
-	# Spawn 4 civs, each with ~12 NPCs and 2 starter houses
-	var spawn_points: Array[Vector2i] = _find_spawn_points(4)
+func _spawn_initial_civs(civ_count: int) -> void:
+	var count: int = clampi(civ_count, 1, CIV_PALETTE.size())
+	var spawn_points: Array[Vector2i] = _find_spawn_points(count)
 	for civ_id in spawn_points.size():
 		var center := spawn_points[civ_id]
+		civs.append({
+			"id": civ_id,
+			"name": _generate_civ_name(civ_id),
+			"color": CIV_PALETTE[civ_id],
+			"spawn_x": center.x,
+			"spawn_y": center.y,
+		})
 		# Place 2 starter houses
-		for h in 2:
+		for _h in 2:
 			var hx := center.x + _rng.randi_range(-4, 4)
 			var hy := center.y + _rng.randi_range(-4, 4)
-			hx = clampi(hx, 2, MAP_W - 3)
-			hy = clampi(hy, 2, MAP_H - 3)
+			hx = clampi(hx, 2, map_w - 3)
+			hy = clampi(hy, 2, map_h - 3)
 			if _is_walkable(hx, hy) and not _tile_occupied_by_building(hx, hy):
 				_place_building(hx, hy, civ_id, true)
 		# Spawn 12 NPCs near center
-		for n in 12:
+		for _n in 12:
 			var nx := center.x + _rng.randi_range(-6, 6)
 			var ny := center.y + _rng.randi_range(-6, 6)
-			nx = clampi(nx, 1, MAP_W - 2)
-			ny = clampi(ny, 1, MAP_H - 2)
+			nx = clampi(nx, 1, map_w - 2)
+			ny = clampi(ny, 1, map_h - 2)
 			if _is_walkable(nx, ny):
 				_spawn_npc(nx, ny, civ_id, _rng.randi_range(16, 40))
 
 func _find_spawn_points(count: int) -> Array[Vector2i]:
 	var points: Array[Vector2i] = []
 	var attempts := 0
-	while points.size() < count and attempts < 1000:
+	var margin: int = mini(20, mini(map_w, map_h) / 4)
+	var min_dist: int = maxi(15, mini(map_w, map_h) / 8)
+	while points.size() < count and attempts < 2000:
 		attempts += 1
-		var x := _rng.randi_range(20, MAP_W - 20)
-		var y := _rng.randi_range(20, MAP_H - 20)
+		var x := _rng.randi_range(margin, map_w - margin)
+		var y := _rng.randi_range(margin, map_h - margin)
 		if not _is_walkable(x, y):
 			continue
 		var b := tile_biome(x, y)
@@ -225,12 +282,27 @@ func _find_spawn_points(count: int) -> Array[Vector2i]:
 			continue
 		var too_close := false
 		for p in points:
-			if p.distance_to(Vector2i(x, y)) < 25:
+			if p.distance_to(Vector2i(x, y)) < min_dist:
 				too_close = true
 				break
 		if not too_close:
 			points.append(Vector2i(x, y))
 	return points
+
+## Procedural civ name. Simple consonant/vowel pattern; will be replaced
+## by the babel_lang Markov generator once it is wired into GDScript.
+func _generate_civ_name(civ_id: int) -> String:
+	const CONS := ["k", "t", "r", "n", "s", "m", "l", "v", "d", "th", "sh", "y"]
+	const VOW := ["a", "e", "i", "o", "u", "a", "e", "i"]
+	# Stable per civ_id + seed so the same world always names civs the same way.
+	var local := RandomNumberGenerator.new()
+	local.seed = _seed_value ^ (civ_id * 0x9E3779B9)
+	var syllables: int = local.randi_range(2, 3)
+	var s := ""
+	for i in syllables:
+		s += CONS[local.randi() % CONS.size()]
+		s += VOW[local.randi() % VOW.size()]
+	return s.capitalize()
 
 func _spawn_npc(x: int, y: int, civ_id: int, age_years: int) -> int:
 	var id := next_npc_id
@@ -256,7 +328,7 @@ func _spawn_npc(x: int, y: int, civ_id: int, age_years: int) -> int:
 	npcs.append(npc)
 	return id
 
-func _place_building(x: int, y: int, civ_id: int, instant: bool) -> int:
+func _place_building(x: int, y: int, civ_id: int, instant: bool = false) -> int:
 	var id := next_building_id
 	next_building_id += 1
 	var b := {
@@ -320,8 +392,8 @@ func _system_movement() -> void:
 			var radius: int = 3 if npc.is_child else 5
 			var tx: int = int(npc.x) + _rng.randi_range(-radius, radius)
 			var ty: int = int(npc.y) + _rng.randi_range(-radius, radius)
-			tx = clampi(tx, 1, MAP_W - 2)
-			ty = clampi(ty, 1, MAP_H - 2)
+			tx = clampi(tx, 1, map_w - 2)
+			ty = clampi(ty, 1, map_h - 2)
 			if _is_walkable(tx, ty):
 				npc.target_x = tx
 				npc.target_y = ty
@@ -449,8 +521,8 @@ func _system_building_request() -> void:
 		for _attempt in 8:
 			var tx: int = cx + _rng.randi_range(-12, 12)
 			var ty: int = cy + _rng.randi_range(-12, 12)
-			tx = clampi(tx, 2, MAP_W - 3)
-			ty = clampi(ty, 2, MAP_H - 3)
+			tx = clampi(tx, 2, map_w - 3)
+			ty = clampi(ty, 2, map_h - 3)
 			if not _is_walkable(tx, ty):
 				continue
 			if _tile_occupied_by_building(tx, ty):

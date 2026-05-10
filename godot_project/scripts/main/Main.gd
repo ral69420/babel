@@ -20,24 +20,41 @@ func _ready() -> void:
 ##
 ## Safe to call when Main.tscn is opened directly during development —
 ## [RunConfig.ensure_defaults] fills in fallbacks matching the previous
-## hard-coded values. The menu / new-game flow populates RunConfig first.
+## hard-coded values. The menu / new-game flow populates RunConfig and
+## generates the world ahead of time, so we skip a redundant generation
+## when [GameState.world_ready] already returns true.
 func start_game() -> void:
 	RunConfig.ensure_defaults()
-	if GameState.sim_ready:
+	if not GameState.sim_ready:
+		push_warning("[Main] No sim. Running in inert mode.")
+		hud.bind(null, null, null)
+		return
+	if not GameState.world_ready():
 		var ok := GameState.start_world(
 			RunConfig.seed,
 			RunConfig.map_width,
 			RunConfig.map_height,
+			RunConfig.civ_count,
 		)
 		if not ok:
 			push_warning("[Main] Failed to start world.")
-		else:
-			hex_grid.bind(GameState)
-			orbit_cam.set_world_bounds(hex_grid.world_rect_3d())
-			hud.bind(GameState, hex_grid, orbit_cam)
-	else:
-		push_warning("[Main] No sim. Running in inert mode.")
-		hud.bind(null, null, null)
+			hud.bind(null, null, null)
+			return
+	hex_grid.bind(GameState)
+	orbit_cam.set_world_bounds(hex_grid.world_rect_3d())
+	hud.bind(GameState, hex_grid, orbit_cam)
+	_focus_on_player_civ()
+
+## Aim the camera at the spawn-point of the player's chosen civ so the
+## game opens with their people on screen.
+func _focus_on_player_civ() -> void:
+	var civ_id: int = RunConfig.player_civ_id
+	var civs: Array = GameState.get_civs()
+	if civ_id < 0 or civ_id >= civs.size():
+		return
+	var civ: Dictionary = civs[civ_id]
+	var pos: Vector3 = hex_grid.hex_center(int(civ.spawn_x), int(civ.spawn_y))
+	orbit_cam.focus_on(pos)
 
 func _process(_delta: float) -> void:
 	if GameState.sim_ready:
