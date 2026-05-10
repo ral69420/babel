@@ -26,6 +26,10 @@ var _pivot: Vector3 = Vector3.ZERO
 var _dragging_orbit := false
 var _dragging_pan := false
 var _world_bounds: AABB = AABB()
+## Active tween for [fly_to]. Replaced (and the old one killed) on every
+## new fly call so an in-flight cinematic doesn't fight a fresh focus
+## request.
+var _fly_tween: Tween = null
 
 func _ready() -> void:
 	if not _camera:
@@ -55,22 +59,58 @@ func focus_on(world_pos: Vector3) -> void:
 	_distance = clampf(_world_bounds.size.length() * 0.12, MIN_DISTANCE, 80.0)
 	_update_transform()
 
+## Smoothly slide the camera pivot to [world_pos] over [duration]
+## seconds. Used by Phase 5's auto-camera to dive on first-of-kind
+## events. Manually panning, orbiting, or a fresh [fly_to] all kill the
+## tween so the player is always in control if they grab the camera.
+func fly_to(world_pos: Vector3, duration: float = 1.2, target_distance: float = -1.0) -> void:
+	_kill_fly_tween()
+	var dest := world_pos
+	dest.y = 0.0
+	var dist: float = target_distance
+	if dist < 0.0:
+		dist = clampf(_world_bounds.size.length() * 0.10, MIN_DISTANCE, 60.0)
+	_fly_tween = create_tween()
+	_fly_tween.set_trans(Tween.TRANS_SINE)
+	_fly_tween.set_ease(Tween.EASE_IN_OUT)
+	_fly_tween.set_parallel(true)
+	_fly_tween.tween_method(Callable(self, "_set_pivot"), _pivot, dest, duration)
+	_fly_tween.tween_method(Callable(self, "_set_distance"), _distance, dist, duration)
+
+func _set_pivot(p: Vector3) -> void:
+	_pivot = p
+	_update_transform()
+
+func _set_distance(d: float) -> void:
+	_distance = d
+	_update_transform()
+
+func _kill_fly_tween() -> void:
+	if _fly_tween != null and _fly_tween.is_valid():
+		_fly_tween.kill()
+	_fly_tween = null
+
 func _unhandled_input(event: InputEvent) -> void:
 	# Zoom
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_kill_fly_tween()
 			_distance = maxf(_distance * (1.0 - ZOOM_STEP), MIN_DISTANCE)
 			_update_transform()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_kill_fly_tween()
 			_distance = minf(_distance * (1.0 + ZOOM_STEP), MAX_DISTANCE)
 			_update_transform()
 		elif mb.button_index == MOUSE_BUTTON_MIDDLE:
+			if mb.pressed:
+				_kill_fly_tween()
 			_dragging_orbit = mb.pressed
 		elif mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_LEFT:
 			# Either mouse button drags the camera. Track which is held so a
 			# release of one doesn't cancel a drag started with the other.
 			if mb.pressed:
+				_kill_fly_tween()
 				_dragging_pan = true
 			else:
 				_dragging_pan = (
@@ -116,6 +156,7 @@ func _process(delta: float) -> void:
 		move.x += 1.0   # right
 
 	if move.length() > 0.0:
+		_kill_fly_tween()
 		var right := _camera.global_transform.basis.x
 		# basis.z is camera-backward; use -basis.z for actual look direction.
 		var forward := -_camera.global_transform.basis.z

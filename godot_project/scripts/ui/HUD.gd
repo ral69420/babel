@@ -20,6 +20,11 @@ const DAYS_PER_YEAR := 360
 @onready var coords_label: Label = $TopBar/Bar/Right/Coords
 @onready var hover_label: Label = $BottomBar/Hover
 @onready var legend_box: HBoxContainer = $BottomBar/Legend
+@onready var save_btn: Button = %Save
+@onready var load_btn: Button = %Load
+@onready var menu_btn: Button = %Menu
+@onready var toast_label: Label = %Toast
+@onready var minimap_rect: TextureRect = %Map
 
 # CivPanel widgets (bottom-left). Bound by unique-name-in-owner so the
 # scene tree path can change without breaking these refs.
@@ -36,9 +41,27 @@ var _hex_grid: Node3D = null
 var _orbit_cam: Node3D = null
 var _current_scale: int = 1
 
+## Minimap state. The terrain layer is rendered once at first refresh
+## from the static biome buffer; the entity layer is repainted at most
+## once per second (configurable via [MINIMAP_NPC_REFRESH_S]).
+var _minimap_terrain: Image = null
+var _minimap_image: Image = null
+var _minimap_texture: ImageTexture = null
+var _minimap_last_refresh: float = -1.0
+var _minimap_dims: Vector2i = Vector2i.ZERO
+const MINIMAP_W := 188
+const MINIMAP_H := 132
+const MINIMAP_NPC_REFRESH_S := 1.0
+
+var _toast_tween: Tween = null
+
 func _ready() -> void:
 	_wire_speed_buttons()
+	_wire_save_buttons()
 	_build_legend()
+	if SaveManager:
+		SaveManager.saved.connect(_on_saved)
+		SaveManager.loaded.connect(_on_loaded)
 
 func bind(state: Node, hex_grid: Node3D, orbit_cam: Node3D) -> void:
 	_state = state
@@ -68,10 +91,18 @@ func refresh() -> void:
 	]
 
 	if _orbit_cam:
-		coords_label.text = "zoom %.0f  ·  [T] borders" % _orbit_cam.get_zoom_level()
+		coords_label.text = "%s %.0f  ·  %s" % [
+			tr("top.zoom"),
+			_orbit_cam.get_zoom_level(),
+			tr("top.borders_hint"),
+		]
+
+	if SaveManager:
+		load_btn.disabled = not SaveManager.has_quicksave()
 
 	_refresh_civ_panel()
 	_refresh_hover_tooltip()
+	_refresh_minimap()
 
 # ── Civ panel (player's civ overview, bottom-left) ────────────────────
 ## Show name + flag colour + leader portrait / name / age / years in
@@ -96,8 +127,8 @@ func _refresh_civ_panel() -> void:
 		leader_id = _state.civ_leader_id(civ_id)
 	leader_portrait.modulate = civ_color
 	if leader_id < 0:
-		leader_name_label.text = "★ (vacant)"
-		leader_sub_label.text = "no eligible elder"
+		leader_name_label.text = "★ —"
+		leader_sub_label.text = tr("civ_panel.no_leader")
 	else:
 		var leader_name: String = ""
 		if _state.has_method("npc_name"):
@@ -112,12 +143,15 @@ func _refresh_civ_panel() -> void:
 			var today: int = _state.current_sim_day()
 			years_in_power = max(0, (today - term_started) / DAYS_PER_YEAR)
 		leader_name_label.text = "★ %s" % leader_name
-		leader_sub_label.text = "age %d  ·  %d y in power" % [age_y, years_in_power]
+		leader_sub_label.text = "%s  ·  %s" % [
+			tr("civ_panel.age") % age_y,
+			tr("civ_panel.years_in_power") % years_in_power,
+		]
 
 	var pop: int = _state.civ_population(civ_id) if _state.has_method("civ_population") else 0
 	var houses: int = _state.civ_buildings_count(civ_id) if _state.has_method("civ_buildings_count") else 0
 	var territory_pct: int = _territory_percent(civ_id)
-	civ_stats_label.text = "%d pop  ·  %d houses  ·  %d%% land" % [pop, houses, territory_pct]
+	civ_stats_label.text = tr("civ_panel.stats") % [pop, houses, territory_pct]
 
 func _territory_percent(civ_id: int) -> int:
 	if not (_state.has_method("civ_territory_tile_count") and _state.has_method("total_owned_tile_count")):
@@ -147,24 +181,24 @@ func _refresh_hover_tooltip() -> void:
 		return
 	var owner_id: int = _state.tile_owner(tile.x, tile.y) if _state.has_method("tile_owner") else -1
 	if owner_id < 0:
-		hover_label.text = "Unclaimed (%d, %d)" % [tile.x, tile.y]
+		hover_label.text = tr("hover.unclaimed") % [tile.x, tile.y]
 		return
 	var civs: Array = _state.get_civs()
 	if owner_id >= civs.size():
 		hover_label.text = ""
 		return
 	var civ: Dictionary = civs[owner_id]
-	var leader_part: String = "no leader"
-	if _state.has_method("civ_leader_id"):
-		var leader_id: int = _state.civ_leader_id(owner_id)
-		if leader_id >= 0 and _state.has_method("npc_name"):
-			var leader_name: String = _state.npc_name(leader_id)
-			var npc: Dictionary = _state.find_npc(leader_id) if _state.has_method("find_npc") else {}
-			var age_y: int = 0
-			if not npc.is_empty():
-				age_y = int(npc.age_days) / DAYS_PER_YEAR
-			leader_part = "★ %s, %dy" % [leader_name, age_y]
-	hover_label.text = "%s  —  %s" % [String(civ.name), leader_part]
+	var civ_name: String = String(civ.name)
+	var leader_id: int = _state.civ_leader_id(owner_id) if _state.has_method("civ_leader_id") else -1
+	if leader_id < 0 or not _state.has_method("npc_name"):
+		hover_label.text = tr("hover.claimed_no_leader") % civ_name
+		return
+	var leader_name: String = _state.npc_name(leader_id)
+	var npc: Dictionary = _state.find_npc(leader_id) if _state.has_method("find_npc") else {}
+	var age_y: int = 0
+	if not npc.is_empty():
+		age_y = int(npc.age_days) / DAYS_PER_YEAR
+	hover_label.text = tr("hover.claimed") % [civ_name, leader_name, age_y]
 
 func _wire_speed_buttons() -> void:
 	pause_btn.pressed.connect(func() -> void: _set_scale(0))
@@ -223,3 +257,123 @@ func _era_for_year(year: int) -> String:
 
 func current_scale() -> int:
 	return _current_scale
+
+# ── Save / Load / Menu buttons ───────────────────────────────────────
+func _wire_save_buttons() -> void:
+	save_btn.text = tr("top.save")
+	load_btn.text = tr("top.load")
+	menu_btn.text = tr("top.menu")
+	save_btn.pressed.connect(_on_save_pressed)
+	load_btn.pressed.connect(_on_load_pressed)
+	menu_btn.pressed.connect(_on_menu_pressed)
+
+func _on_save_pressed() -> void:
+	if SaveManager:
+		SaveManager.quick_save()
+
+func _on_load_pressed() -> void:
+	if SaveManager:
+		SaveManager.quick_load()
+
+func _on_menu_pressed() -> void:
+	# Bounce back to the title screen. The autoloads (GameState,
+	# RunConfig, SaveManager) outlive this transition.
+	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+
+func _on_saved(ok: bool, _path: String) -> void:
+	_show_toast(tr("toast.saved") if ok else tr("toast.save_failed"), ok)
+
+func _on_loaded(ok: bool, _path: String) -> void:
+	if ok:
+		# Force a full HUD refresh on the next frame: the loaded sim
+		# will have a different civ_count / leader / population, and
+		# minimap dims may have changed.
+		_minimap_terrain = null
+		_minimap_dims = Vector2i.ZERO
+		_show_toast(tr("toast.loaded"), true)
+	else:
+		var key: String = "toast.no_save" if (SaveManager and not SaveManager.has_quicksave()) else "toast.load_failed"
+		_show_toast(tr(key), false)
+
+func _show_toast(text: String, success: bool) -> void:
+	toast_label.text = text
+	toast_label.add_theme_color_override(
+		"font_color",
+		Color8(186, 232, 158, 255) if success else Color8(232, 158, 158, 255),
+	)
+	if _toast_tween != null and _toast_tween.is_valid():
+		_toast_tween.kill()
+	toast_label.modulate = Color(1, 1, 1, 1)
+	_toast_tween = create_tween()
+	_toast_tween.tween_interval(1.4)
+	_toast_tween.tween_property(toast_label, "modulate:a", 0.0, 0.5)
+
+# ── Minimap ───────────────────────────────────────────────────────────
+## Paint a 188×132 minimap into the top-right corner. Terrain (biome
+## colours) is rasterised once and cached in [_minimap_terrain]; NPC
+## dots are repainted on top at most once a second so this stays
+## ~free even at very-fast time scale.
+func _refresh_minimap() -> void:
+	if _state == null or minimap_rect == null:
+		return
+	var dims: Vector2i = _state.dims() if _state.has_method("dims") else Vector2i.ZERO
+	if dims.x <= 0 or dims.y <= 0:
+		return
+	if _minimap_terrain == null or dims != _minimap_dims:
+		_paint_minimap_terrain(dims)
+	var now: float = float(Time.get_ticks_msec()) / 1000.0
+	if now - _minimap_last_refresh < MINIMAP_NPC_REFRESH_S:
+		return
+	_minimap_last_refresh = now
+	_paint_minimap_entities()
+
+func _paint_minimap_terrain(dims: Vector2i) -> void:
+	_minimap_dims = dims
+	_minimap_terrain = Image.create(MINIMAP_W, MINIMAP_H, false, Image.FORMAT_RGBA8)
+	for py in MINIMAP_H:
+		var ty: int = int(float(py) / float(MINIMAP_H) * float(dims.y))
+		ty = clampi(ty, 0, dims.y - 1)
+		for px in MINIMAP_W:
+			var tx: int = int(float(px) / float(MINIMAP_W) * float(dims.x))
+			tx = clampi(tx, 0, dims.x - 1)
+			_minimap_terrain.set_pixel(px, py, _biome_color(_state.tile_biome(tx, ty)))
+	_minimap_image = _minimap_terrain.duplicate() as Image
+	_minimap_texture = ImageTexture.create_from_image(_minimap_image)
+	minimap_rect.texture = _minimap_texture
+
+func _paint_minimap_entities() -> void:
+	if _minimap_terrain == null or _minimap_image == null:
+		return
+	# Reset to the cached terrain layer, then sprinkle NPC dots and a
+	# white outline of the visible camera frustum on top.
+	_minimap_image.copy_from(_minimap_terrain)
+	var dims: Vector2i = _minimap_dims
+	for npc in _state.get_npcs():
+		if not npc.alive:
+			continue
+		var civ_id: int = int(npc.civ_id)
+		var col: Color = _state.civ_color(civ_id) if _state.has_method("civ_color") else Color.WHITE
+		var px: int = int(float(int(npc.x)) / float(dims.x) * float(MINIMAP_W))
+		var py: int = int(float(int(npc.y)) / float(dims.y) * float(MINIMAP_H))
+		_set_pixel_2x2(px, py, col)
+	_minimap_texture.update(_minimap_image)
+
+func _set_pixel_2x2(px: int, py: int, col: Color) -> void:
+	for dy in 2:
+		for dx in 2:
+			var x: int = px + dx
+			var y: int = py + dy
+			if x >= 0 and x < MINIMAP_W and y >= 0 and y < MINIMAP_H:
+				_minimap_image.set_pixel(x, y, col)
+
+func _biome_color(biome: int) -> Color:
+	match biome:
+		0: return Color8(28,  46,  76,  255)   # ocean
+		1: return Color8(64,  102, 132, 255)   # coast
+		2: return Color8(159, 175, 102, 255)   # plains
+		3: return Color8(58,  100, 64,  255)   # forest
+		4: return Color8(124, 132, 96,  255)   # hills
+		5: return Color8(110, 100, 92,  255)   # mountain
+		6: return Color8(206, 184, 124, 255)   # desert
+		7: return Color8(214, 220, 224, 255)   # tundra
+		_: return Color.MAGENTA
