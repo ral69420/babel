@@ -53,7 +53,7 @@ var _dims: Vector2i = Vector2i.ZERO
 var _entity_root: Node3D
 var _npc_sprites: Dictionary = {}
 var _building_sprites: Dictionary = {}
-var _tree_sprites: Array[Sprite3D] = []
+var _tree_sprites: Array[Node3D] = []
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
 var _tree_texture: Texture2D
@@ -307,20 +307,32 @@ func _place_trees() -> void:
 			var chance: float = 0.30 if biome == 3 else 0.10
 			if rng.randf() > chance:
 				continue
-			var sprite := Sprite3D.new()
-			sprite.texture = _tree_texture
-			sprite.pixel_size = 0.02 + rng.randf() * 0.008
-			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-			sprite.transparent = true
-			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+
+			var pixel_size: float = 0.02 + rng.randf() * 0.008
 			var pos: Vector3 = hex_center(q, r)
 			var ox: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
 			var oz: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
-			var y: float = _ground_anchor_y(pos.y, TREE_TEX_H, sprite.pixel_size)
-			sprite.position = Vector3(pos.x + ox, y, pos.z + oz)
-			_entity_root.add_child(sprite)
-			_tree_sprites.append(sprite)
+			var y: float = _ground_anchor_y(pos.y, TREE_TEX_H, pixel_size)
+
+			# Cross-billboard: two perpendicular fixed quads instead of a
+			# single billboarded sprite, so the tree has visible volume
+			# from every camera angle and never goes edge-on / paper-thin.
+			var tree_root := Node3D.new()
+			tree_root.position = Vector3(pos.x + ox, y, pos.z + oz)
+			tree_root.rotation.y = rng.randf() * TAU
+			for i in 2:
+				var quad := Sprite3D.new()
+				quad.texture = _tree_texture
+				quad.pixel_size = pixel_size
+				quad.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+				quad.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+				quad.transparent = true
+				quad.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+				quad.double_sided = true
+				quad.rotation.y = i * (PI * 0.5)
+				tree_root.add_child(quad)
+			_entity_root.add_child(tree_root)
+			_tree_sprites.append(tree_root)
 
 # ─── Entity rendering ───────────────────────────────────────────────
 func _update_npcs() -> void:
