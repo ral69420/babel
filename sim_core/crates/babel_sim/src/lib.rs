@@ -29,6 +29,7 @@
 pub mod det_rng;
 pub mod entity;
 pub mod event;
+pub mod spawn;
 pub mod tick;
 pub mod time_sys;
 pub mod world;
@@ -37,8 +38,12 @@ pub mod worldgen;
 mod systems;
 
 pub use det_rng::DetRng;
-pub use entity::{CityId, CivId, FactionId, NpcId};
+pub use entity::{CityId, CityTheme, CivId, FactionId, NpcId};
 pub use event::{Event, EventKind, EventLog};
+pub use spawn::{
+    found_city, seed_world, spawn_npcs, CivSpec, EventSummary, SeededCiv, SpawnError,
+    MAX_STARTING_CIVS, STARTING_CAPITAL_POPULATION,
+};
 pub use tick::TickClock;
 pub use time_sys::{Calendar, Season};
 pub use world::{Biome, Tile, World, WorldDims};
