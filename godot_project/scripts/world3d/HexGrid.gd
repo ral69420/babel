@@ -59,7 +59,7 @@ var _dims: Vector2i = Vector2i.ZERO
 var _entity_root: Node3D
 var _npc_sprites: Dictionary = {}
 var _building_sprites: Dictionary = {}
-var _tree_sprites: Array[Node3D] = []
+var _tree_sprites: Dictionary = {}   # tree_id (int) → Node3D
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
 var _tree_texture: Texture2D
@@ -100,6 +100,7 @@ func update_entities() -> void:
 		return
 	_update_npcs()
 	_update_buildings()
+	_update_trees()
 
 # ─── Smooth elevation ────────────────────────────────────────────────
 func _precompute_smooth_elevation() -> void:
@@ -255,7 +256,6 @@ func _build_terrain() -> void:
 		add_child(mi)
 
 	_add_water_plane()
-	_place_trees()
 	print("[HexGrid] Terrain built.")
 
 func _add_water_plane() -> void:
@@ -298,47 +298,101 @@ func _add_water_plane() -> void:
 	water_mi.position = Vector3(max_x * 0.5, -0.45, max_z * 0.5)
 	add_child(water_mi)
 
-func _place_trees() -> void:
+## Pixel-size used for an ADULT tree. Younger stages scale down off this.
+const TREE_BASE_PIXEL := 0.024
+## Cosmetic only — yaw + tile offsets are derived deterministically from
+## the tile coords so the same tree always looks the same.
+func _tree_jitter(tx: int, ty: int) -> Vector3:
+	# 16 × 16 pseudo-random table baked from tile coords.
+	var a: float = float((tx * 73856093) ^ (ty * 19349663))
+	var b: float = float((tx * 83492791) ^ (ty * 12289))
+	var yaw: float = fposmod(a * 0.0001, TAU)
+	var ox: float = (fposmod(b * 0.0001, 1.0) - 0.5) * HEX_SIZE * 0.6
+	var oz: float = (fposmod(a * 0.00013, 1.0) - 0.5) * HEX_SIZE * 0.6
+	return Vector3(ox, yaw, oz)
+
+func _scale_for_tree_stage(stage: int) -> float:
+	# StubSim.TreeStage: 0=SAPLING 1=YOUNG 2=ADULT 3=STUMP 4=EMPTY
+	match stage:
+		0: return 0.35
+		1: return 0.65
+		2: return 1.0
+		3: return 0.25
+		_: return 0.0
+
+func _modulate_for_tree_stage(stage: int) -> Color:
+	match stage:
+		0: return Color(0.85, 1.10, 0.85)   # bright sapling
+		1: return Color(0.95, 1.05, 0.95)
+		2: return Color.WHITE
+		3: return Color(0.45, 0.32, 0.22)   # brown stump
+		_: return Color.WHITE
+
+func _spawn_tree_node(pos: Vector3, jitter: Vector3, base_pixel: float) -> Node3D:
+	var root := Node3D.new()
+	var y := _ground_anchor_y(pos.y, TREE_TEX_H, base_pixel)
+	root.position = Vector3(pos.x + jitter.x, y, pos.z + jitter.z)
+	root.rotation.y = jitter.y
+	for i in 2:
+		var quad := Sprite3D.new()
+		quad.texture = _tree_texture
+		quad.pixel_size = base_pixel
+		quad.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		quad.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		quad.transparent = true
+		quad.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		quad.double_sided = true
+		quad.rotation.y = i * (PI * 0.5)
+		root.add_child(quad)
+	return root
+
+func _update_trees() -> void:
 	if not _tree_texture:
 		return
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 42
-	# Place trees on forest (3) and hills (4) biomes
-	for r in _dims.y:
-		for q in _dims.x:
-			var biome: int = clampi(_state.tile_biome(q, r), 0, 7)
-			if biome != 3 and biome != 4:
-				continue
-			# ~30% chance on forest, ~10% on hills
-			var chance: float = 0.30 if biome == 3 else 0.10
-			if rng.randf() > chance:
-				continue
-
-			var pixel_size: float = 0.02 + rng.randf() * 0.008
-			var pos: Vector3 = hex_center(q, r)
-			var ox: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
-			var oz: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
-			var y: float = _ground_anchor_y(pos.y, TREE_TEX_H, pixel_size)
-
-			# Cross-billboard: two perpendicular fixed quads instead of a
-			# single billboarded sprite, so the tree has visible volume
-			# from every camera angle and never goes edge-on / paper-thin.
-			var tree_root := Node3D.new()
-			tree_root.position = Vector3(pos.x + ox, y, pos.z + oz)
-			tree_root.rotation.y = rng.randf() * TAU
-			for i in 2:
-				var quad := Sprite3D.new()
-				quad.texture = _tree_texture
-				quad.pixel_size = pixel_size
-				quad.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-				quad.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-				quad.transparent = true
-				quad.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-				quad.double_sided = true
-				quad.rotation.y = i * (PI * 0.5)
-				tree_root.add_child(quad)
-			_entity_root.add_child(tree_root)
-			_tree_sprites.append(tree_root)
+	var tree_list: Array = _state.get_trees()
+	var active_ids: Dictionary = {}
+	for t in tree_list:
+		var tid: int = int(t.id)
+		var stage: int = int(t.stage)
+		var scale_factor: float = _scale_for_tree_stage(stage)
+		if scale_factor <= 0.0:
+			continue   # EMPTY — don't render
+		active_ids[tid] = true
+		var tx: int = int(t.x)
+		var ty: int = int(t.y)
+		var pos: Vector3 = hex_center(tx, ty)
+		var jitter: Vector3 = _tree_jitter(tx, ty)
+		var pixel_size: float = TREE_BASE_PIXEL * scale_factor
+		var root: Node3D = _tree_sprites.get(tid, null) as Node3D
+		if root == null:
+			root = _spawn_tree_node(pos, jitter, pixel_size)
+			_entity_root.add_child(root)
+			_tree_sprites[tid] = root
+		else:
+			# Stage may have changed (e.g. SAPLING→YOUNG, ADULT→STUMP).
+			# Just re-anchor and re-scale on every refresh — cheap.
+			root.position = Vector3(
+				pos.x + jitter.x,
+				_ground_anchor_y(pos.y, TREE_TEX_H, pixel_size),
+				pos.z + jitter.z,
+			)
+		# Update each quad's pixel_size + tint to reflect the current stage.
+		var tint: Color = _modulate_for_tree_stage(stage)
+		for child in root.get_children():
+			if child is Sprite3D:
+				var s: Sprite3D = child
+				s.pixel_size = pixel_size
+				s.modulate = tint
+	# Drop any sprites whose tree disappeared (regrowth-failure pruning).
+	var to_drop: Array[int] = []
+	for key in _tree_sprites.keys():
+		if not active_ids.has(int(key)):
+			to_drop.append(int(key))
+	for key in to_drop:
+		var n: Node = _tree_sprites[key]
+		if is_instance_valid(n):
+			n.queue_free()
+		_tree_sprites.erase(key)
 
 # ─── Entity rendering ───────────────────────────────────────────────
 func _update_npcs() -> void:

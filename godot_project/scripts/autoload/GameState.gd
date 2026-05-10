@@ -151,3 +151,13 @@ func civ_color(civ_id: int) -> Color:
 	if _society and _society.has_method("civ_color"):
 		return _society.civ_color(civ_id)
 	return Color(0.7, 0.7, 0.7)
+
+func get_trees() -> Array:
+	if _society and _society.has_method("get_trees"):
+		return _society.get_trees()
+	return []
+
+func civ_wood(civ_id: int) -> int:
+	if _society and _society.has_method("civ_wood"):
+		return _society.civ_wood(civ_id)
+	return 0

@@ -50,7 +50,10 @@ func refresh() -> void:
 
 	var npc_count: int = _state.get_npcs().size()
 	var bld_count: int = _state.get_buildings().size()
-	era_label.text = "%s  ·  %d pop  ·  %d bld" % [_era_for_year(year), npc_count, bld_count]
+	var wood: int = _state.civ_wood(RunConfig.player_civ_id) if _state.has_method("civ_wood") else 0
+	era_label.text = "%s  ·  %d pop  ·  %d bld  ·  %d wood" % [
+		_era_for_year(year), npc_count, bld_count, wood,
+	]
 
 	if _orbit_cam:
 		coords_label.text = "zoom %.0f" % _orbit_cam.get_zoom_level()
