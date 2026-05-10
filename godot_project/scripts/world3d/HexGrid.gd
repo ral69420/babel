@@ -554,9 +554,12 @@ func _build_terrain() -> void:
 			var n := Vector3(nx, 1.0, nz).normalized()
 			normals[j * _grid_x + i] = n
 
-	# Pass 3: triangle indices. Each grid cell becomes two triangles;
-	# winding is chosen so the cross product points along +Y (matches
-	# the `cull_back` shader render mode in `terrain_blend.gdshader`).
+	# Pass 3: triangle indices. Each grid cell becomes two triangles.
+	# Winding traces clockwise when viewed from +Y (camera above) so
+	# the +Y face is the front face under Godot's `cull_back` mode —
+	# this matches the existing per-hex fan in territory overlays which
+	# uses the same orientation. Getting this backwards culls the
+	# entire terrain (the regression in PR #21 that this change fixes).
 	var cell_x: int = _grid_x - 1
 	var cell_z: int = _grid_z - 1
 	var indices := PackedInt32Array()
@@ -569,11 +572,11 @@ func _build_terrain() -> void:
 			var v01: int = (j + 1) * _grid_x + i
 			var v11: int = (j + 1) * _grid_x + (i + 1)
 			indices[ii] = v00
-			indices[ii + 1] = v01
-			indices[ii + 2] = v10
+			indices[ii + 1] = v10
+			indices[ii + 2] = v01
 			indices[ii + 3] = v10
-			indices[ii + 4] = v01
-			indices[ii + 5] = v11
+			indices[ii + 4] = v11
+			indices[ii + 5] = v01
 			ii += 6
 
 	var arr := []
