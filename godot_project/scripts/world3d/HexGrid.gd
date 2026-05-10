@@ -43,13 +43,16 @@ var _dims: Vector2i = Vector2i.ZERO
 var _entity_root: Node3D
 var _npc_sprites: Dictionary = {}
 var _building_sprites: Dictionary = {}
+var _tree_sprites: Array[Sprite3D] = []
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
-var _smooth_elev: PackedFloat32Array  ## Pre-computed smoothed elevation per tile.
+var _tree_texture: Texture2D
+var _smooth_elev: PackedFloat32Array
 
 func _ready() -> void:
 	_npc_texture = load("res://assets/npcs/default/walk_south.png") as Texture2D
 	_building_texture = load("res://assets/buildings/default/house.png") as Texture2D
+	_tree_texture = load("res://assets/decorations/tree_pine/tree_pine.png") as Texture2D
 	_entity_root = Node3D.new()
 	_entity_root.name = "Entities"
 	add_child(_entity_root)
@@ -231,6 +234,7 @@ func _build_terrain() -> void:
 		add_child(mi)
 
 	_add_water_plane()
+	_place_trees()
 	print("[HexGrid] Terrain built.")
 
 func _add_water_plane() -> void:
@@ -273,6 +277,35 @@ func _add_water_plane() -> void:
 	water_mi.position = Vector3(max_x * 0.5, -0.45, max_z * 0.5)
 	add_child(water_mi)
 
+func _place_trees() -> void:
+	if not _tree_texture:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 42
+	# Place trees on forest (3) and hills (4) biomes
+	for r in _dims.y:
+		for q in _dims.x:
+			var biome: int = clampi(_state.tile_biome(q, r), 0, 7)
+			if biome != 3 and biome != 4:
+				continue
+			# ~30% chance on forest, ~10% on hills
+			var chance: float = 0.30 if biome == 3 else 0.10
+			if rng.randf() > chance:
+				continue
+			var sprite := Sprite3D.new()
+			sprite.texture = _tree_texture
+			sprite.pixel_size = 0.02 + rng.randf() * 0.008
+			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+			sprite.transparent = true
+			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+			var pos: Vector3 = hex_center(q, r)
+			var ox: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
+			var oz: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
+			sprite.position = Vector3(pos.x + ox, pos.y + 0.35, pos.z + oz)
+			_entity_root.add_child(sprite)
+			_tree_sprites.append(sprite)
+
 # ─── Entity rendering ───────────────────────────────────────────────
 func _update_npcs() -> void:
 	var npc_list: Array = _state.get_npcs()
@@ -293,7 +326,7 @@ func _update_npcs() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _npc_texture
 			sprite.hframes = 6
-			sprite.pixel_size = 0.03
+			sprite.pixel_size = 0.021
 			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
@@ -307,9 +340,9 @@ func _update_npcs() -> void:
 		sprite.position = Vector3(pos.x, pos.y + 0.5, pos.z)
 
 		if npc.is_child:
-			sprite.pixel_size = 0.022
+			sprite.pixel_size = 0.015
 		else:
-			sprite.pixel_size = 0.03
+			sprite.pixel_size = 0.021
 
 		var frame_idx: int = (Engine.get_frames_drawn() / 8 + int(npc.id)) % 6
 		sprite.frame = frame_idx
@@ -335,10 +368,8 @@ func _update_buildings() -> void:
 		else:
 			sprite = Sprite3D.new()
 			sprite.texture = _building_texture
-			sprite.pixel_size = 0.05
-			# Y-fixed billboard: stays upright, rotates on Y to face camera.
-			# Looks correct from any camera angle without clipping into hex.
-			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+			sprite.pixel_size = 0.035
+			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
@@ -351,16 +382,16 @@ func _update_buildings() -> void:
 		var stage: int = bld.stage
 		if stage == 4:
 			sprite.modulate = Color(1, 1, 1, 1)
-			sprite.pixel_size = 0.05
+			sprite.pixel_size = 0.035
 		elif stage == 3:
 			sprite.modulate = Color(0.9, 0.9, 0.9, 0.95)
-			sprite.pixel_size = 0.045
+			sprite.pixel_size = 0.032
 		elif stage == 2:
 			sprite.modulate = Color(0.7, 0.7, 0.7, 0.85)
-			sprite.pixel_size = 0.04
+			sprite.pixel_size = 0.028
 		elif stage == 1:
 			sprite.modulate = Color(0.6, 0.6, 0.5, 0.7)
-			sprite.pixel_size = 0.03
+			sprite.pixel_size = 0.021
 		else:
 			sprite.modulate = Color(0.5, 0.5, 0.4, 0.5)
-			sprite.pixel_size = 0.02
+			sprite.pixel_size = 0.014
