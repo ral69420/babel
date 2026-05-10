@@ -21,14 +21,14 @@ const BIOME_TEXTURES := [
 ]
 
 const BIOME_BASE_ELEV := [
-	-0.8,   # Ocean
-	-0.05,  # Coast
+	-0.4,   # Ocean
+	-0.02,  # Coast
 	0.0,    # Plains
-	0.15,   # Forest
-	0.6,    # Hills
-	1.8,    # Mountain — tall peaks
-	0.05,   # Desert
-	0.2,    # Tundra
+	0.08,   # Forest
+	0.3,    # Hills
+	0.8,    # Mountain
+	0.03,   # Desert
+	0.1,    # Tundra
 ]
 
 const CIV_COLORS := [
@@ -93,10 +93,10 @@ func _precompute_smooth_elevation() -> void:
 			var raw_elev: int = _state.tile_elevation(q, r)
 			raw[r * _dims.x + q] = BIOME_BASE_ELEV[biome] + float(raw_elev) * ELEV_SCALE
 
-	# Two-pass Gaussian-like smooth for realistic terrain
+	# Multi-pass smooth for very gentle terrain transitions
 	_smooth_elev = PackedFloat32Array()
 	_smooth_elev.resize(_dims.x * _dims.y)
-	for pass_i in 2:
+	for pass_i in 4:
 		var src: PackedFloat32Array = raw if pass_i == 0 else _smooth_elev.duplicate()
 		for r in _dims.y:
 			for q in _dims.x:
@@ -130,11 +130,13 @@ func _get_smooth_elevation(q: int, r: int) -> float:
 		return -0.8
 	return _smooth_elev[r * _dims.x + q]
 
+const HEX_CORNER_SCALE := 1.06  ## Overlap to close gaps between hexes.
+
 func _hex_corner_smooth(center_q: int, center_r: int, center_pos: Vector3, i: int) -> Vector3:
 	var angle_deg: float = 60.0 * i
 	var angle_rad: float = deg_to_rad(angle_deg)
-	var corner_x: float = center_pos.x + HEX_SIZE * cos(angle_rad)
-	var corner_z: float = center_pos.z + HEX_SIZE * sin(angle_rad)
+	var corner_x: float = center_pos.x + HEX_SIZE * HEX_CORNER_SCALE * cos(angle_rad)
+	var corner_z: float = center_pos.z + HEX_SIZE * HEX_CORNER_SCALE * sin(angle_rad)
 	# Average elevation between center and adjacent hex for smooth edges
 	var adj := _hex_neighbors(center_q, center_r)
 	var corner_y: float = center_pos.y
@@ -232,24 +234,44 @@ func _build_terrain() -> void:
 	print("[HexGrid] Terrain built.")
 
 func _add_water_plane() -> void:
-	var water_mat := StandardMaterial3D.new()
-	water_mat.albedo_color = Color(0.12, 0.30, 0.55, 0.75)
-	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	water_mat.roughness = 0.2
-	water_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-
 	var max_x: float = HEX_SIZE * 1.5 * _dims.x + HEX_SIZE
 	var max_z: float = HEX_SIZE * SQRT3 * _dims.y + HEX_SIZE
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(max_x * 1.2, max_z * 1.2)
-	plane.material = water_mat
 
-	var mi := MeshInstance3D.new()
-	mi.mesh = plane
-	mi.name = "WaterPlane"
-	mi.position = Vector3(max_x * 0.5, -0.2, max_z * 0.5)
-	add_child(mi)
+	# Ground plane: fills gaps between hex tiles with terrain-like color
+	var ground_mat := StandardMaterial3D.new()
+	ground_mat.albedo_color = Color(0.45, 0.55, 0.30, 1.0)
+	ground_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	ground_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	ground_mat.roughness = 1.0
+	ground_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var ground_plane := PlaneMesh.new()
+	ground_plane.size = Vector2(max_x * 1.2, max_z * 1.2)
+	ground_plane.material = ground_mat
+
+	var ground_mi := MeshInstance3D.new()
+	ground_mi.mesh = ground_plane
+	ground_mi.name = "GroundPlane"
+	ground_mi.position = Vector3(max_x * 0.5, -0.5, max_z * 0.5)
+	add_child(ground_mi)
+
+	# Water plane: only visible in deep ocean areas
+	var water_mat := StandardMaterial3D.new()
+	water_mat.albedo_color = Color(0.10, 0.28, 0.52, 1.0)
+	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	water_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	water_mat.roughness = 0.3
+	water_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var water_plane := PlaneMesh.new()
+	water_plane.size = Vector2(max_x * 1.2, max_z * 1.2)
+	water_plane.material = water_mat
+
+	var water_mi := MeshInstance3D.new()
+	water_mi.mesh = water_plane
+	water_mi.name = "WaterPlane"
+	water_mi.position = Vector3(max_x * 0.5, -0.45, max_z * 0.5)
+	add_child(water_mi)
 
 # ─── Entity rendering ───────────────────────────────────────────────
 func _update_npcs() -> void:
@@ -314,19 +336,17 @@ func _update_buildings() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _building_texture
 			sprite.pixel_size = 0.05
-			# Buildings anchored — no billboard, fixed on hex
-			sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+			# Y-fixed billboard: stays upright, rotates on Y to face camera.
+			# Looks correct from any camera angle without clipping into hex.
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-			sprite.axis = Vector3.AXIS_Y
 			_entity_root.add_child(sprite)
 			_building_sprites[bld.id] = sprite
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, pos.y + 0.4, pos.z)
-		# Face south (fixed rotation, not following camera)
-		sprite.rotation_degrees = Vector3(-90, 0, 0)
 
 		var stage: int = bld.stage
 		if stage == 4:
