@@ -295,7 +295,7 @@ func _place_trees() -> void:
 			var sprite := Sprite3D.new()
 			sprite.texture = _tree_texture
 			sprite.pixel_size = 0.02 + rng.randf() * 0.008
-			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
@@ -327,7 +327,7 @@ func _update_npcs() -> void:
 			sprite.texture = _npc_texture
 			sprite.hframes = 6
 			sprite.pixel_size = 0.021
-			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
@@ -369,7 +369,7 @@ func _update_buildings() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _building_texture
 			sprite.pixel_size = 0.035
-			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
 			sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
