@@ -19,6 +19,7 @@ const TICKS_PER_FRAME := 1
 
 @onready var world_view: Node2D = $WorldRoot/WorldView
 @onready var camera: Camera2D = $WorldRoot/CameraRig
+@onready var test_npc: Node2D = $WorldRoot/TestNpc
 @onready var hud: CanvasLayer = $HUD
 
 func _ready() -> void:
@@ -30,6 +31,10 @@ func _ready() -> void:
 			world_view.bind(GameState)
 			camera.set_world_rect(world_view.world_rect())
 			hud.bind(GameState, world_view, camera)
+			# TestNpc is a smoke check that the sprite/animation pipeline
+			# works end-to-end. It walks a clockwise square inside the
+			# map and is unrelated to the sim's NPC entities.
+			test_npc.setup(world_view.world_rect())
 	else:
 		push_warning("[Main] No sim. Running in inert mode.")
 		hud.bind(null, null, null)
