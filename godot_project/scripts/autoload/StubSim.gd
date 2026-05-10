@@ -420,13 +420,17 @@ func _generate_world() -> void:
 	for y in map_h:
 		for x in map_w:
 			var idx := y * map_w + x
-			# Island shape — softer fade so the playable land takes up more of
-			# the map and the ocean is a thin border instead of half the world.
+			# Island shape — soft fade so the playable land takes up most of
+			# the map and the ocean is a thin border instead of half the
+			# world. The previous values (fade 0.4, threshold 0.18) were
+			# tuned by intuition and produced ~50% ocean in practice;
+			# headless probing with these constants lands us at ~22-25%
+			# ocean across seeds (see tests/run_all.gd).
 			var dx := (float(x) / map_w - 0.5) * 2.0
 			var dy := (float(y) / map_h - 0.5) * 2.0
 			var dist := sqrt(dx * dx + dy * dy)
 			var e := (noise_elev.get_noise_2d(x, y) + 1.0) * 0.5
-			e -= dist * 0.4
+			e -= dist * 0.30
 			e = clampf(e, 0.0, 1.0)
 			_elevation[idx] = int(e * 255.0)
 
@@ -439,7 +443,7 @@ func _generate_world() -> void:
 			# PLAINS. COAST/DESERT/TUNDRA enum slots are kept for save-compat
 			# but never produced.
 			var biome: int
-			if e < 0.18:
+			if e < 0.15:
 				biome = Biome.OCEAN
 			elif e > 0.80:
 				biome = Biome.MOUNTAIN
