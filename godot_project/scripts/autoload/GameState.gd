@@ -86,3 +86,10 @@ func season() -> int:
 	if not sim_ready:
 		return 0
 	return sim.season()
+
+## Summon a Strugatsky "Zone" anomaly at `(x, y)`.
+## Returns number of tiles tagged (0 = out of bounds).
+func summon_zone(x: int, y: int) -> int:
+	if not sim_ready:
+		return 0
+	return sim.summon_zone(x, y)

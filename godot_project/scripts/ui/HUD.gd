@@ -24,6 +24,7 @@ const BIOME_NAMES := ["Ocean", "Coast", "Plains", "Forest", "Hills", "Mountain",
 
 const TILE_TAG_RUIN  := 0x01
 const TILE_TAG_RIVER := 0x04
+const TILE_TAG_ZONE  := 0x10
 
 @onready var era_label: Label = $TopBar/Bar/Left/Era
 @onready var year_label: Label = $TopBar/Bar/Left/YearSeason
@@ -91,6 +92,8 @@ func _refresh_hover_label() -> void:
 		extra = " · river"
 	elif (tags & TILE_TAG_RUIN) != 0:
 		extra = " · ruin"
+	if (tags & TILE_TAG_ZONE) != 0:
+		extra += " · zone"
 	hover_label.text = "(%d, %d)  %s  elev %d%s" % [t.x, t.y, name, elev, extra]
 
 func _wire_speed_buttons() -> void:
