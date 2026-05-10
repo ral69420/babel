@@ -6,12 +6,10 @@ extends Node2D
 ##   - drive per-frame `advance` calls
 ##   - hand off rendering to [WorldView]
 ##   - hand off UI to [HUD]
-##
-## Keeps no state of its own — just orchestration.
 
-const DEFAULT_SEED := 0x000B_ABE1  # mirrors babel_sim::SimConfig::default
-const DEFAULT_WIDTH := 256
-const DEFAULT_HEIGHT := 256
+const DEFAULT_SEED := 0x000B_ABE1
+const DEFAULT_WIDTH := 128
+const DEFAULT_HEIGHT := 128
 const TICKS_PER_FRAME := 1
 
 @onready var world_view: Node2D = $WorldRoot/WorldView
@@ -22,7 +20,7 @@ func _ready() -> void:
 	if GameState.sim_ready:
 		var ok := GameState.start_world(DEFAULT_SEED, DEFAULT_WIDTH, DEFAULT_HEIGHT)
 		if not ok:
-			push_warning("[Main] Failed to start world. Check BabelSim extension.")
+			push_warning("[Main] Failed to start world.")
 		else:
 			world_view.bind(GameState)
 			camera.set_world_rect(world_view.world_rect())
@@ -34,6 +32,7 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if GameState.sim_ready:
 		GameState.advance(TICKS_PER_FRAME)
+		world_view.update_entities()
 		hud.refresh()
 
 func _input(event: InputEvent) -> void:

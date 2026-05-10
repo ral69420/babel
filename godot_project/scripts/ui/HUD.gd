@@ -62,7 +62,17 @@ func refresh() -> void:
 	var hour: int = _state.hour()
 	year_label.text = "Year %d  ·  %s  ·  %02d:00" % [year, SEASON_NAMES[season_idx], hour]
 	year_label.add_theme_color_override("font_color", SEASON_COLORS[season_idx])
-	era_label.text = _era_for_year(year)
+	# Show NPC/building stats alongside era
+	var npc_count := 0
+	var bld_count := 0
+	if _state.has_method("get_npcs"):
+		var npc_list: Array = _state.get_npcs()
+		for n in npc_list:
+			if n.alive:
+				npc_count += 1
+	if _state.has_method("get_buildings"):
+		bld_count = _state.get_buildings().size()
+	era_label.text = "%s  ·  %d pop  ·  %d bld" % [_era_for_year(year), npc_count, bld_count]
 	_refresh_coords_label()
 	_refresh_hover_label()
 
