@@ -161,3 +161,76 @@ func civ_wood(civ_id: int) -> int:
 	if _society and _society.has_method("civ_wood"):
 		return _society.civ_wood(civ_id)
 	return 0
+
+func tile_owner(x: int, y: int) -> int:
+	if _society and _society.has_method("tile_owner"):
+		return _society.tile_owner(x, y)
+	return -1
+
+func territory_version() -> int:
+	if _society and _society.has_method("territory_version"):
+		return _society.territory_version()
+	return 0
+
+# ── Leadership pass-throughs ──────────────────────────────────────────
+func civ_leader_id(civ_id: int) -> int:
+	if _society and _society.has_method("civ_leader_id"):
+		return _society.civ_leader_id(civ_id)
+	return -1
+
+func civ_leader_term_started_day(civ_id: int) -> int:
+	if _society and _society.has_method("civ_leader_term_started_day"):
+		return _society.civ_leader_term_started_day(civ_id)
+	return 0
+
+func find_npc(id: int) -> Dictionary:
+	if _society and _society.has_method("find_npc"):
+		return _society.find_npc(id)
+	return {}
+
+func npc_name(id: int) -> String:
+	if _society and _society.has_method("npc_name"):
+		return _society.npc_name(id)
+	return ""
+
+func civ_population(civ_id: int) -> int:
+	if _society and _society.has_method("civ_population"):
+		return _society.civ_population(civ_id)
+	return 0
+
+func civ_buildings_count(civ_id: int) -> int:
+	if _society and _society.has_method("civ_buildings_count"):
+		return _society.civ_buildings_count(civ_id)
+	return 0
+
+func civ_territory_tile_count(civ_id: int) -> int:
+	if _society and _society.has_method("civ_territory_tile_count"):
+		return _society.civ_territory_tile_count(civ_id)
+	return 0
+
+func total_owned_tile_count() -> int:
+	if _society and _society.has_method("total_owned_tile_count"):
+		return _society.total_owned_tile_count()
+	return 0
+
+func current_sim_day() -> int:
+	if _society and _society.has_method("current_sim_day"):
+		return _society.current_sim_day()
+	return 0
+
+# ── Event stream pass-throughs ────────────────────────────────────────
+## Drains the simulation's recent-events queue. Caller (typically Main /
+## an event listener) is expected to consume immediately — the queue
+## empties on every read so two consumers cannot share it without
+## duplication.
+func recent_events() -> Array:
+	if _society and _society.has_method("recent_events"):
+		return _society.recent_events()
+	return []
+
+# ── Save / load helpers ───────────────────────────────────────────────
+## Direct access to the society loop node. Used by [SaveManager] and by
+## test code that needs to call StubSim methods that aren't surfaced as
+## individual pass-throughs (e.g. [to_save_dict] / [load_from_dict]).
+func society() -> Node:
+	return _society

@@ -1,9 +1,14 @@
-[gd_scene load_steps=8 format=3 uid="uid://baxbel0002"]
+[gd_scene load_steps=10 format=3 uid="uid://baxbel0002"]
 
 [ext_resource type="Script" uid="uid://1dsbkxmuucgv" path="res://scripts/main/Main.gd" id="1"]
 [ext_resource type="Script" uid="uid://mboq2vkl5knv" path="res://scripts/world3d/HexGrid.gd" id="2"]
 [ext_resource type="Script" uid="uid://bb185m2fad4e3" path="res://scripts/ui/HUD.gd" id="3"]
 [ext_resource type="Script" uid="uid://bnrx7rp4ciuy0" path="res://scripts/world3d/OrbitCamera.gd" id="4"]
+[ext_resource type="Texture2D" path="res://assets/npcs/default/walk_south.png" id="5"]
+
+[sub_resource type="AtlasTexture" id="leader_portrait_atlas"]
+atlas = ExtResource("5")
+region = Rect2(0, 0, 32, 48)
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
 sky_top_color = Color(0.45, 0.6, 0.85, 1)
@@ -110,6 +115,26 @@ layout_mode = 2
 text = "zoom 1.0×"
 horizontal_alignment = 2
 
+[node name="Buttons" type="HBoxContainer" parent="HUD/TopBar/Bar/Right"]
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_constants/separation = 4
+
+[node name="Save" type="Button" parent="HUD/TopBar/Bar/Right/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Save"
+
+[node name="Load" type="Button" parent="HUD/TopBar/Bar/Right/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Load"
+
+[node name="Menu" type="Button" parent="HUD/TopBar/Bar/Right/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Menu"
+
 [node name="BottomBar" type="MarginContainer" parent="HUD"]
 anchors_preset = 12
 anchor_top = 1.0
@@ -132,3 +157,128 @@ layout_mode = 2
 size_flags_horizontal = 8
 text = "—"
 horizontal_alignment = 2
+
+[node name="CivPanel" type="PanelContainer" parent="HUD"]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = -208.0
+offset_right = 304.0
+offset_bottom = -64.0
+grow_vertical = 0
+
+[node name="Margin" type="MarginContainer" parent="HUD/CivPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="HUD/CivPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HeaderRow" type="HBoxContainer" parent="HUD/CivPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Flag" type="ColorRect" parent="HUD/CivPanel/Margin/VBox/HeaderRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.7, 0.7, 0.7, 1)
+
+[node name="CivName" type="Label" parent="HUD/CivPanel/Margin/VBox/HeaderRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 18
+text = "—"
+
+[node name="Sep" type="HSeparator" parent="HUD/CivPanel/Margin/VBox"]
+layout_mode = 2
+
+[node name="LeaderRow" type="HBoxContainer" parent="HUD/CivPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Portrait" type="TextureRect" parent="HUD/CivPanel/Margin/VBox/LeaderRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 60)
+layout_mode = 2
+texture_filter = 1
+texture = SubResource("leader_portrait_atlas")
+expand_mode = 1
+stretch_mode = 5
+modulate = Color(0.7, 0.7, 0.7, 1)
+
+[node name="LeaderInfo" type="VBoxContainer" parent="HUD/CivPanel/Margin/VBox/LeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 2
+
+[node name="LeaderName" type="Label" parent="HUD/CivPanel/Margin/VBox/LeaderRow/LeaderInfo"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "★ —"
+
+[node name="LeaderSub" type="Label" parent="HUD/CivPanel/Margin/VBox/LeaderRow/LeaderInfo"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "—"
+
+[node name="Stats" type="Label" parent="HUD/CivPanel/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "—"
+
+[node name="MinimapPanel" type="PanelContainer" parent="HUD"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -204.0
+offset_top = 44.0
+offset_right = -8.0
+offset_bottom = 184.0
+grow_horizontal = 0
+
+[node name="Margin" type="MarginContainer" parent="HUD/MinimapPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="Map" type="TextureRect" parent="HUD/MinimapPanel/Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(188, 132)
+expand_mode = 1
+stretch_mode = 5
+texture_filter = 1
+
+[node name="Toast" type="Label" parent="HUD"]
+unique_name_in_owner = true
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -120.0
+offset_top = -110.0
+offset_right = 120.0
+offset_bottom = -80.0
+grow_horizontal = 2
+grow_vertical = 0
+horizontal_alignment = 1
+vertical_alignment = 1
+text = ""
+theme_override_font_sizes/font_size = 14
+modulate = Color(1, 1, 1, 0)
