@@ -93,3 +93,65 @@ func summon_zone(x: int, y: int) -> int:
 	if not sim_ready:
 		return 0
 	return sim.summon_zone(x, y)
+
+# ----- Society loop accessors -----
+
+func npc_count() -> int:
+	if not sim_ready:
+		return 0
+	return sim.npc_count()
+
+func npc_pos(idx: int) -> Vector2i:
+	if not sim_ready:
+		return Vector2i(-1, -1)
+	return sim.npc_pos(idx)
+
+func npc_age_years(idx: int) -> int:
+	if not sim_ready:
+		return 0
+	return sim.npc_age_years(idx)
+
+func npc_age_days(idx: int) -> int:
+	if not sim_ready:
+		return 0
+	return sim.npc_age_days(idx)
+
+func npc_state(idx: int) -> String:
+	if not sim_ready:
+		return ""
+	return sim.npc_state(idx)
+
+func npc_sex(idx: int) -> String:
+	if not sim_ready:
+		return ""
+	return sim.npc_sex(idx)
+
+func npc_name(idx: int) -> String:
+	if not sim_ready:
+		return ""
+	return sim.npc_name(idx)
+
+func building_count() -> int:
+	if not sim_ready:
+		return 0
+	return sim.building_count()
+
+func building_pos(idx: int) -> Vector2i:
+	if not sim_ready:
+		return Vector2i(-1, -1)
+	return sim.building_pos(idx)
+
+func building_stage(idx: int) -> int:
+	if not sim_ready:
+		return 0
+	return sim.building_stage(idx)
+
+func building_progress_pct(idx: int) -> int:
+	if not sim_ready:
+		return 0
+	return sim.building_progress_pct(idx)
+
+func building_kind(idx: int) -> String:
+	if not sim_ready:
+		return ""
+	return sim.building_kind(idx)

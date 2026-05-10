@@ -18,6 +18,8 @@ const DEFAULT_HEIGHT := 128
 const TICKS_PER_FRAME := 1
 
 @onready var world_view: Node2D = $WorldRoot/WorldView
+@onready var buildings_layer: Node2D = $WorldRoot/BuildingsLayer
+@onready var npc_layer: Node2D = $WorldRoot/NpcLayer
 @onready var camera: Camera2D = $WorldRoot/CameraRig
 @onready var test_npc: Node2D = $WorldRoot/TestNpc
 @onready var hud: CanvasLayer = $HUD
@@ -31,10 +33,17 @@ func _ready() -> void:
 			world_view.bind(GameState)
 			camera.set_world_rect(world_view.world_rect())
 			hud.bind(GameState, world_view, camera)
+			# Society layers — sync sprites + progress bars from sim.
+			buildings_layer.bind(GameState)
+			npc_layer.bind(GameState)
 			# TestNpc is a smoke check that the sprite/animation pipeline
 			# works end-to-end. It walks a clockwise square inside the
 			# map and is unrelated to the sim's NPC entities.
 			test_npc.setup(world_view.world_rect())
+			# Auto-pick a higher speed so the society loop is observable
+			# without the user having to fiddle with hotkeys. 16× ≈ 1
+			# sim-year per ~33 real seconds.
+			GameState.set_time_scale(16)
 	else:
 		push_warning("[Main] No sim. Running in inert mode.")
 		hud.bind(null, null, null)

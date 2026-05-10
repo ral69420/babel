@@ -214,6 +214,9 @@ fn event_kind_name(kind: &EventKind) -> &'static str {
         EventKind::PeaceMade { .. } => "PeaceMade",
         EventKind::ConceptFading { .. } => "ConceptFading",
         EventKind::ZoneAppeared { .. } => "ZoneAppeared",
+        EventKind::NpcPaired { .. } => "NpcPaired",
+        EventKind::BuildingFounded { .. } => "BuildingFounded",
+        EventKind::BuildingCompleted { .. } => "BuildingCompleted",
         EventKind::Flavour { .. } => "Flavour",
     }
 }

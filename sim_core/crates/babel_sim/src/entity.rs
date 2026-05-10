@@ -68,6 +68,10 @@ id_newtype!(NpcId, "Stable id for an NPC.");
 id_newtype!(CityId, "Stable id for a city.");
 id_newtype!(CivId, "Stable id for a civilization.");
 id_newtype!(FactionId, "Stable id for a faction (rebel / cult / guild).");
+id_newtype!(
+    BuildingId,
+    "Stable id for a building (granary, house, etc.)."
+);
 
 /// Generic slot-vector with generations. Insertions reuse free slots; removed
 /// slots bump the generation counter so stale ids can be detected.
@@ -204,7 +208,9 @@ pub struct Npc {
     pub x: i32,
     /// Tile coordinate.
     pub y: i32,
-    /// Birth tick. Used to derive age.
+    /// Birth tick. Used to derive age. For NPCs seeded with a non-zero
+    /// starting age, [`Npc::age_days`] holds the actual ageable counter
+    /// instead — `birth_tick` only records the tick of insertion.
     pub birth_tick: u64,
     /// Death tick, or `u64::MAX` if alive.
     pub death_tick: u64,
@@ -223,6 +229,18 @@ pub struct Npc {
     pub mother: NpcId,
     /// Father, if known.
     pub father: NpcId,
+    // ----- Society loop: ageing, pairing, gestation, housing -----
+    /// Age in sim-days. Incremented by the daily pulse. Decoupled from
+    /// `birth_tick` so seeded adults can spawn at e.g. 18 sim-years old
+    /// without back-dating the world clock.
+    pub age_days: u32,
+    /// Last day-of-sim on which this NPC gave birth, used as cooldown
+    /// gate. `u32::MAX` = never.
+    pub last_birth_day: u32,
+    /// Days remaining in active gestation, or `u16::MAX` if not pregnant.
+    pub gestation_days: u16,
+    /// Home building, if any. `BuildingId::NONE` = no fixed home (yet).
+    pub home: BuildingId,
 }
 
 /// Compact stat block. Total size 8 bytes.
@@ -378,6 +396,86 @@ pub struct Faction {
     pub strength: u8,
 }
 
+/// Type of placed structure. Visual-only for now; gameplay treats all
+/// kinds the same (single-family residence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum BuildingKind {
+    /// Round-roof granary — the bootstrap residence used by the very
+    /// first families before specialised house types are added.
+    Granary = 0,
+}
+
+/// Construction stage for a [`Building`]. Stages are entered when the
+/// build progress crosses fixed thresholds — see
+/// [`BuildingStage::for_progress`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum BuildingStage {
+    /// Foundation laid, no walls yet.
+    Foundation = 0,
+    /// Wooden frame visible, walls partial.
+    Frame = 1,
+    /// Walls complete, roof not yet placed.
+    Walls = 2,
+    /// Roofed but not yet trimmed — last visible WIP step.
+    Roof = 3,
+    /// Construction finished. Sprite is the final asset.
+    Complete = 4,
+}
+
+/// Total construction time in sim-days. Drives stage thresholds and the
+/// progress bar shown above the building.
+pub const BUILDING_TOTAL_DAYS: u16 = 30;
+
+impl BuildingStage {
+    /// Decide which stage corresponds to a progress count in sim-days.
+    /// Thresholds: 0–5 Foundation, 5–12 Frame, 12–22 Walls, 22–30 Roof,
+    /// ≥30 Complete.
+    #[must_use]
+    pub fn for_progress(days: u16) -> Self {
+        match days {
+            0..=4 => Self::Foundation,
+            5..=11 => Self::Frame,
+            12..=21 => Self::Walls,
+            22..=29 => Self::Roof,
+            _ => Self::Complete,
+        }
+    }
+}
+
+/// One placed structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Building {
+    /// Visual / functional kind.
+    pub kind: BuildingKind,
+    /// Tile coordinate (top-left for multi-tile footprints).
+    pub x: i32,
+    /// Tile coordinate.
+    pub y: i32,
+    /// Owning civ.
+    pub civ: CivId,
+    /// First owner of the pair, if any.
+    pub owner_a: NpcId,
+    /// Second owner of the pair, if any.
+    pub owner_b: NpcId,
+    /// Tick at which construction was started.
+    pub founded_tick: u64,
+    /// Construction progress in sim-days, capped at
+    /// [`BUILDING_TOTAL_DAYS`].
+    pub progress_days: u16,
+    /// Cached stage; recomputed from `progress_days` each tick.
+    pub stage: BuildingStage,
+}
+
+impl Building {
+    /// Final stage reached?
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.stage == BuildingStage::Complete
+    }
+}
+
 /// Why does a faction exist?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactionKind {
@@ -409,6 +507,9 @@ pub struct Civilizations(pub SlotVec<Civilization>);
 /// All factions.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Factions(pub SlotVec<Faction>);
+/// All placed buildings.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Buildings(pub SlotVec<Building>);
 
 impl Npcs {
     /// Insert a new NPC, returning a typed id.
@@ -559,6 +660,44 @@ impl Factions {
     /// Iter mut.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (FactionId, &mut Faction)> {
         self.0.iter_mut().map(|(id, n)| (FactionId(id), n))
+    }
+}
+
+impl Buildings {
+    /// Insert.
+    pub fn insert(&mut self, b: Building) -> BuildingId {
+        BuildingId(self.0.insert(b))
+    }
+    /// Get.
+    #[must_use]
+    pub fn get(&self, id: BuildingId) -> Option<&Building> {
+        self.0.get(id.0)
+    }
+    /// Mut get.
+    pub fn get_mut(&mut self, id: BuildingId) -> Option<&mut Building> {
+        self.0.get_mut(id.0)
+    }
+    /// Remove.
+    pub fn remove(&mut self, id: BuildingId) -> Option<Building> {
+        self.0.remove(id.0)
+    }
+    /// Live count.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    /// Empty?
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    /// Iter.
+    pub fn iter(&self) -> impl Iterator<Item = (BuildingId, &Building)> {
+        self.0.iter().map(|(id, n)| (BuildingId(id), n))
+    }
+    /// Iter mut.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (BuildingId, &mut Building)> {
+        self.0.iter_mut().map(|(id, n)| (BuildingId(id), n))
     }
 }
 

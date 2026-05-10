@@ -353,6 +353,128 @@ impl SimHandle {
             .map_or(0, |(_, n)| n.traits.health)
     }
 
+    /// Age in sim-years of the `idx`-th live NPC. `0` if invalid.
+    #[must_use]
+    pub fn npc_age_years(&self, idx: u32) -> u32 {
+        self.world
+            .as_ref()
+            .and_then(|w| {
+                w.npcs
+                    .iter()
+                    .filter(|(_, n)| n.death_tick == u64::MAX)
+                    .nth(idx as usize)
+            })
+            .map_or(0, |(_, n)| n.age_days / babel_sim::time_sys::DAYS_PER_YEAR)
+    }
+
+    /// Age in sim-days of the `idx`-th live NPC. `0` if invalid. Used by
+    /// the renderer to scale child sprites.
+    #[must_use]
+    pub fn npc_age_days(&self, idx: u32) -> u32 {
+        self.world
+            .as_ref()
+            .and_then(|w| {
+                w.npcs
+                    .iter()
+                    .filter(|(_, n)| n.death_tick == u64::MAX)
+                    .nth(idx as usize)
+            })
+            .map_or(0, |(_, n)| n.age_days)
+    }
+
+    /// Sex of the `idx`-th live NPC: `"M"`, `"F"`, or empty.
+    #[must_use]
+    pub fn npc_sex(&self, idx: u32) -> String {
+        self.world
+            .as_ref()
+            .and_then(|w| {
+                w.npcs
+                    .iter()
+                    .filter(|(_, n)| n.death_tick == u64::MAX)
+                    .nth(idx as usize)
+            })
+            .map_or_else(String::new, |(_, n)| match n.sex {
+                babel_sim::Sex::M => "M".into(),
+                babel_sim::Sex::F => "F".into(),
+            })
+    }
+
+    /// State string for the `idx`-th live NPC: `"child"`, `"single"`,
+    /// `"paired"`, `"pregnant"`, or empty if invalid. Used for HUD and
+    /// renderer.
+    #[must_use]
+    pub fn npc_state(&self, idx: u32) -> String {
+        self.world
+            .as_ref()
+            .and_then(|w| {
+                w.npcs
+                    .iter()
+                    .filter(|(_, n)| n.death_tick == u64::MAX)
+                    .nth(idx as usize)
+            })
+            .map_or_else(String::new, |(_, n)| {
+                let child_days = 14 * babel_sim::time_sys::DAYS_PER_YEAR;
+                if n.age_days < child_days {
+                    "child".into()
+                } else if n.gestation_days != u16::MAX {
+                    "pregnant".into()
+                } else if !n.spouse.is_none() {
+                    "paired".into()
+                } else {
+                    "single".into()
+                }
+            })
+    }
+
+    /// Number of placed buildings (any stage).
+    #[must_use]
+    pub fn building_count(&self) -> u32 {
+        self.world.as_ref().map_or(0, |w| w.buildings.len() as u32)
+    }
+
+    /// Position of the `idx`-th building. Returns `(-1, -1)` if invalid.
+    #[must_use]
+    pub fn building_pos(&self, idx: u32) -> (i32, i32) {
+        self.world
+            .as_ref()
+            .and_then(|w| w.buildings.iter().nth(idx as usize))
+            .map_or((-1, -1), |(_, b)| (b.x, b.y))
+    }
+
+    /// Stage index for the `idx`-th building: 0 Foundation, 1 Frame,
+    /// 2 Walls, 3 Roof, 4 Complete. Returns 255 if invalid.
+    #[must_use]
+    pub fn building_stage(&self, idx: u32) -> u8 {
+        self.world
+            .as_ref()
+            .and_then(|w| w.buildings.iter().nth(idx as usize))
+            .map_or(255, |(_, b)| b.stage as u8)
+    }
+
+    /// Construction progress in `0..=100` for the `idx`-th building.
+    /// Returns 0 if invalid.
+    #[must_use]
+    pub fn building_progress_pct(&self, idx: u32) -> u32 {
+        self.world
+            .as_ref()
+            .and_then(|w| w.buildings.iter().nth(idx as usize))
+            .map_or(0, |(_, b)| {
+                let total = u32::from(babel_sim::entity::BUILDING_TOTAL_DAYS).max(1);
+                let prog = u32::from(b.progress_days);
+                (prog * 100 / total).min(100)
+            })
+    }
+
+    /// Kind name for the `idx`-th building: e.g. `"Granary"`. Empty if
+    /// invalid.
+    #[must_use]
+    pub fn building_kind(&self, idx: u32) -> String {
+        self.world
+            .as_ref()
+            .and_then(|w| w.buildings.iter().nth(idx as usize))
+            .map_or_else(String::new, |(_, b)| format!("{:?}", b.kind))
+    }
+
     /// Summon a Strugatsky "Zone" anomaly at `(x, y)`. Returns the number of
     /// tiles tagged.
     pub fn summon_zone(&mut self, x: i32, y: i32) -> u32 {
@@ -443,6 +565,21 @@ fn event_headline(event: &Event, world: &World) -> String {
         }
         EventKind::ZoneAppeared { x, y } => {
             format!("Zone anomaly at ({x},{y})")
+        }
+        EventKind::NpcPaired { a, b } => {
+            let na = world.npcs.get(*a).map_or("?", |n| n.name.as_str());
+            let nb = world.npcs.get(*b).map_or("?", |n| n.name.as_str());
+            format!("{na} and {nb} paired")
+        }
+        EventKind::BuildingFounded { x, y, .. } => {
+            format!("Foundation laid at ({x},{y})")
+        }
+        EventKind::BuildingCompleted { building, .. } => {
+            let pos = world
+                .buildings
+                .get(*building)
+                .map_or_else(|| "?".to_string(), |b| format!("({},{})", b.x, b.y));
+            format!("Building completed at {pos}")
         }
         EventKind::Flavour { template_id, .. } => {
             format!("Event #{template_id}")

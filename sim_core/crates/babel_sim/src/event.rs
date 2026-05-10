@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::entity::{CityId, CivId, FactionId, NpcId};
+use crate::entity::{BuildingId, CityId, CivId, FactionId, NpcId};
 
 /// Maximum number of raw events held in the log before summarisation.
 pub const DEFAULT_CAPACITY: usize = 65_536;
@@ -120,6 +120,31 @@ pub enum EventKind {
         /// Tile.
         y: i32,
     },
+    /// Two NPCs paired up. Both `partner_id`s are now set on each.
+    NpcPaired {
+        /// First partner.
+        a: NpcId,
+        /// Second partner.
+        b: NpcId,
+    },
+    /// A foundation was laid for a new building.
+    BuildingFounded {
+        /// New building id.
+        building: BuildingId,
+        /// Owning civ.
+        civ: CivId,
+        /// Tile (x, y).
+        x: i32,
+        /// Tile (x, y).
+        y: i32,
+    },
+    /// A building reached the `Complete` stage.
+    BuildingCompleted {
+        /// Building id.
+        building: BuildingId,
+        /// Owning civ.
+        civ: CivId,
+    },
     /// Generic flavour event from a content template.
     /// Used when no engine-level event applies but the chronicle should
     /// record something (festivals, omens, etc.).
@@ -137,7 +162,7 @@ pub enum EventKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum DeathCause {
-    /// Old age.
+    /// Old age — the only natural cause currently used by the systems.
     OldAge = 0,
     /// Sickness / plague.
     Sickness = 1,
