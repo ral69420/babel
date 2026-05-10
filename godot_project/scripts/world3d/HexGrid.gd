@@ -3,11 +3,21 @@ extends Node3D
 ##
 ## Uses flat-top hexagons in offset coordinates (q, r).
 ## Terrain has smooth elevation transitions using neighbor averaging.
-## Buildings are anchored to the hex surface (no billboard).
+## Billboard sprites (buildings, trees, NPCs) are bottom-anchored to the
+## terrain so they don't sink into the mesh or appear to float at the same Y.
 
 const HEX_SIZE := 1.0
 const SQRT3 := 1.7320508
 const ELEV_SCALE := 0.025       ## More pronounced elevation.
+
+## Texture heights (px) used to anchor billboard sprites to the ground.
+## With Sprite3D's default centered = true, position.y is the sprite
+## centre, so we offset by half_height_world to put the bottom edge on
+## the terrain instead of burying half the sprite underground.
+const HOUSE_TEX_H := 64.0
+const TREE_TEX_H := 64.0
+const NPC_TEX_FRAME_H := 48.0
+const GROUND_BIAS := 0.02       ## Tiny lift to avoid z-fighting with terrain.
 
 const BIOME_TEXTURES := [
 	"res://assets/tiles/ocean/ocean.png",
@@ -132,6 +142,11 @@ func _get_smooth_elevation(q: int, r: int) -> float:
 	if q < 0 or r < 0 or q >= _dims.x or r >= _dims.y:
 		return -0.8
 	return _smooth_elev[r * _dims.x + q]
+
+## Returns the Y position that places the *bottom* of a centered Sprite3D
+## flush with the terrain at the given hex centre, plus a small bias.
+func _ground_anchor_y(ground_y: float, tex_h_px: float, pixel_size_world: float) -> float:
+	return ground_y + tex_h_px * pixel_size_world * 0.5 + GROUND_BIAS
 
 const HEX_CORNER_SCALE := 1.06  ## Overlap to close gaps between hexes.
 
@@ -302,7 +317,8 @@ func _place_trees() -> void:
 			var pos: Vector3 = hex_center(q, r)
 			var ox: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
 			var oz: float = (rng.randf() - 0.5) * HEX_SIZE * 0.6
-			sprite.position = Vector3(pos.x + ox, pos.y + 0.35, pos.z + oz)
+			var y: float = _ground_anchor_y(pos.y, TREE_TEX_H, sprite.pixel_size)
+			sprite.position = Vector3(pos.x + ox, y, pos.z + oz)
 			_entity_root.add_child(sprite)
 			_tree_sprites.append(sprite)
 
@@ -336,13 +352,14 @@ func _update_npcs() -> void:
 			_entity_root.add_child(sprite)
 			_npc_sprites[npc.id] = sprite
 
-		var pos: Vector3 = hex_center(int(npc.x), int(npc.y))
-		sprite.position = Vector3(pos.x, pos.y + 0.5, pos.z)
-
+		# Set pixel_size first so anchoring uses the correct half-height.
 		if npc.is_child:
 			sprite.pixel_size = 0.015
 		else:
 			sprite.pixel_size = 0.021
+
+		var pos: Vector3 = hex_center(int(npc.x), int(npc.y))
+		sprite.position = Vector3(pos.x, _ground_anchor_y(pos.y, NPC_TEX_FRAME_H, sprite.pixel_size), pos.z)
 
 		var frame_idx: int = (Engine.get_frames_drawn() / 8 + int(npc.id)) % 6
 		sprite.frame = frame_idx
@@ -376,9 +393,8 @@ func _update_buildings() -> void:
 			_entity_root.add_child(sprite)
 			_building_sprites[bld.id] = sprite
 
-		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
-		sprite.position = Vector3(pos.x, pos.y + 0.4, pos.z)
-
+		# Update pixel_size + modulate first (stage-dependent),
+		# then anchor so the sprite bottom rests on the terrain.
 		var stage: int = bld.stage
 		if stage == 4:
 			sprite.modulate = Color(1, 1, 1, 1)
@@ -395,3 +411,6 @@ func _update_buildings() -> void:
 		else:
 			sprite.modulate = Color(0.5, 0.5, 0.4, 0.5)
 			sprite.pixel_size = 0.014
+
+		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
+		sprite.position = Vector3(pos.x, _ground_anchor_y(pos.y, HOUSE_TEX_H, sprite.pixel_size), pos.z)
