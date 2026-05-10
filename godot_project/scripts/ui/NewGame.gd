@@ -2,10 +2,15 @@ extends Control
 ## "New Game" screen — pick seed / map size / civ count, then go to
 ## world generation.
 
+## Map-size presets shown in the New Game screen.
+## Phase 0.5 widens the slider to 256 – 2048; the larger options need the
+## Big-World perf track (MultiMesh terrain, sim/render decoupling) before
+## they hit the 240+ FPS target on mid-range hardware.
 const MAP_PRESETS := {
-	"small": Vector2i(128, 128),
-	"medium": Vector2i(256, 256),
-	"large": Vector2i(384, 384),
+	"small": Vector2i(256, 256),
+	"medium": Vector2i(512, 512),
+	"large": Vector2i(1024, 1024),
+	"huge": Vector2i(2048, 2048),
 }
 
 @onready var _seed_input: LineEdit = %SeedInput
@@ -16,7 +21,7 @@ const MAP_PRESETS := {
 @onready var _generate_button: Button = %GenerateButton
 @onready var _back_button: Button = %BackButton
 
-var _selected_size_key: String = "medium"
+var _selected_size_key: String = "small"
 
 
 func _ready() -> void:
@@ -39,7 +44,7 @@ func _setup_size_buttons() -> void:
 			var btn := child as Button
 			btn.toggle_mode = true
 			btn.pressed.connect(_on_size_pressed.bind(btn))
-			if btn.name == "Medium":
+			if btn.name == "Small":
 				btn.button_pressed = true
 
 
@@ -70,7 +75,7 @@ func _parse_seed() -> int:
 
 
 func _on_generate() -> void:
-	var dims: Vector2i = MAP_PRESETS.get(_selected_size_key, Vector2i(256, 256))
+	var dims: Vector2i = MAP_PRESETS.get(_selected_size_key, MAP_PRESETS["small"])
 	RunConfig.configure(
 		_parse_seed(),
 		dims.x,

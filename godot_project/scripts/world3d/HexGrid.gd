@@ -17,29 +17,47 @@ const ELEV_SCALE := 0.025       ## More pronounced elevation.
 const HOUSE_TEX_H := 64.0
 const TREE_TEX_H := 64.0
 const NPC_TEX_FRAME_H := 48.0
+const GRASS_TEX_H := 128.0
 const GROUND_BIAS := 0.02       ## Tiny lift to avoid z-fighting with terrain.
 
+## Visual scale for entities. Heights are world units (~1.0 = a hex radius).
+## NPC adult height ≈ 0.336 → tree adult height = 3 × NPC = 1.008 →
+## house complete height ≈ tree height (slightly taller for civic builds).
+const NPC_PIXEL_ADULT := 0.007
+const NPC_PIXEL_CHILD := 0.005
+
+## Biome enum is preserved for save-compat (StubSim.Biome). After the
+## Phase 0.5 world-tweaks pass, world generation never produces COAST,
+## DESERT or TUNDRA — those slots fall back to plains art so legacy
+## indexing keeps working.
 const BIOME_TEXTURES := [
 	"res://assets/tiles/ocean/ocean.png",
-	"res://assets/tiles/coast/coast.png",
+	"res://assets/tiles/plains/plains.png",  # was coast — now plains fallback
 	"res://assets/tiles/plains/plains.png",
 	"res://assets/tiles/forest/forest.png",
 	"res://assets/tiles/hills/hills.png",
 	"res://assets/tiles/mountain/mountain.png",
-	"res://assets/tiles/desert/desert.png",
-	"res://assets/tiles/tundra/tundra.png",
+	"res://assets/tiles/plains/plains.png",  # was desert — now plains fallback
+	"res://assets/tiles/plains/plains.png",  # was tundra — now plains fallback
 ]
 
 const BIOME_BASE_ELEV := [
 	-0.4,   # Ocean
-	-0.02,  # Coast
+	0.0,    # (legacy Coast slot) → plains elevation
 	0.0,    # Plains
 	0.08,   # Forest
 	0.3,    # Hills
 	0.8,    # Mountain
-	0.03,   # Desert
-	0.1,    # Tundra
+	0.0,    # (legacy Desert slot) → plains elevation
+	0.0,    # (legacy Tundra slot) → plains elevation
 ]
+
+## Decoration density per biome (used by the grass MultiMesh).
+const GRASS_DENSITY_PER_BIOME := {
+	2: 4,   # Plains  — ~4 tufts/tile
+	3: 5,   # Forest  — ~5 tufts/tile (forest floor)
+	4: 2,   # Hills   — ~2 tufts/tile
+}
 
 ## Fallback civ colour palette used when [GameState.get_civs] is empty
 ## (e.g. running directly from Main.tscn without going through the menu).
@@ -68,6 +86,12 @@ var _leader_markers: Dictionary = {}
 var _npc_texture: Texture2D
 var _building_texture: Texture2D
 var _tree_texture: Texture2D
+var _grass_texture: Texture2D
+var _vegetation_shader: Shader
+var _tree_wind_material: ShaderMaterial
+var _grass_wind_material: ShaderMaterial
+var _grass_multimesh: MultiMeshInstance3D
+var _leaves_particles: GPUParticles3D
 var _smooth_elev: PackedFloat32Array
 
 # Territory overlay
@@ -82,12 +106,35 @@ func _ready() -> void:
 	_npc_texture = load("res://assets/npcs/default/walk_south.png") as Texture2D
 	_building_texture = load("res://assets/buildings/default/house.png") as Texture2D
 	_tree_texture = load("res://assets/decorations/tree_pine/tree_pine.png") as Texture2D
+	_grass_texture = load("res://assets/decorations/grass/grass.png") as Texture2D
+	_vegetation_shader = load("res://shaders/vegetation_wind.gdshader") as Shader
+	_tree_wind_material = _make_wind_material(_tree_texture, 0.04, 0.7, 0.4)
+	_grass_wind_material = _make_wind_material(_grass_texture, 0.02, 1.4, 1.1)
 	_entity_root = Node3D.new()
 	_entity_root.name = "Entities"
 	add_child(_entity_root)
 	_territory_root = Node3D.new()
 	_territory_root.name = "Territory"
 	add_child(_territory_root)
+
+## Build a single ShaderMaterial that all instances of a given foliage
+## kind share — keeps draw calls + state changes minimal. Per-plant
+## variation comes from world position inside the shader.
+func _make_wind_material(
+	tex: Texture2D,
+	strength: float,
+	speed: float,
+	jitter: float,
+) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = _vegetation_shader
+	mat.set_shader_parameter("albedo_tex", tex)
+	mat.set_shader_parameter("tint", Color.WHITE)
+	mat.set_shader_parameter("wind_strength", strength)
+	mat.set_shader_parameter("wind_speed", speed)
+	mat.set_shader_parameter("wind_jitter", jitter)
+	mat.set_shader_parameter("alpha_cutoff", 0.5)
+	return mat
 
 func bind(state: Node) -> void:
 	_state = state
@@ -96,6 +143,9 @@ func bind(state: Node) -> void:
 		return
 	_precompute_smooth_elevation()
 	_build_terrain()
+	_build_grass_multimesh()
+	_spawn_leaves_particles()
+	_spawn_fireflies_particles()
 
 func world_rect_3d() -> AABB:
 	var max_x: float = HEX_SIZE * 1.5 * _dims.x
@@ -352,7 +402,10 @@ func _add_water_plane() -> void:
 	add_child(water_mi)
 
 ## Pixel-size used for an ADULT tree. Younger stages scale down off this.
-const TREE_BASE_PIXEL := 0.024
+## Adult tree height = TREE_BASE_PIXEL × TREE_TEX_H = 0.01575 × 64 ≈ 1.008,
+## i.e. exactly 3 × adult-NPC height (0.336). Buildings match this height
+## by default; civic buildings (added later) can scale up off it.
+const TREE_BASE_PIXEL := 0.01575
 ## Cosmetic only — yaw + tile offsets are derived deterministically from
 ## the tile coords so the same tree always looks the same.
 func _tree_jitter(tx: int, ty: int) -> Vector3:
@@ -396,6 +449,11 @@ func _spawn_tree_node(pos: Vector3, jitter: Vector3, base_pixel: float) -> Node3
 		quad.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 		quad.double_sided = true
 		quad.rotation.y = i * (PI * 0.5)
+		# Single shared ShaderMaterial across all tree quads → one draw
+		# call per tree pass, plus per-tree wind variance derived from
+		# world position inside the shader (no per-instance uniforms).
+		if _tree_wind_material:
+			quad.material_override = _tree_wind_material
 		root.add_child(quad)
 	return root
 
@@ -512,7 +570,7 @@ func _update_npcs() -> void:
 			sprite = Sprite3D.new()
 			sprite.texture = _npc_texture
 			sprite.hframes = 6
-			sprite.pixel_size = 0.021
+			sprite.pixel_size = NPC_PIXEL_ADULT
 			sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			sprite.transparent = true
@@ -524,9 +582,9 @@ func _update_npcs() -> void:
 
 		# Set pixel_size first so anchoring uses the correct half-height.
 		if npc.is_child:
-			sprite.pixel_size = 0.015
+			sprite.pixel_size = NPC_PIXEL_CHILD
 		else:
-			sprite.pixel_size = 0.021
+			sprite.pixel_size = NPC_PIXEL_ADULT
 
 		var pos: Vector3 = hex_center(int(npc.x), int(npc.y))
 		sprite.position = Vector3(pos.x, _ground_anchor_y(pos.y, NPC_TEX_FRAME_H, sprite.pixel_size), pos.z)
@@ -571,27 +629,319 @@ func _update_buildings() -> void:
 			_entity_root.add_child(sprite)
 			_building_sprites[bld.id] = sprite
 
-		# Update pixel_size + modulate first (stage-dependent),
-		# then anchor so the sprite bottom rests on the terrain.
+		# Stage-driven scale + tint. Complete (stage 4) house matches the
+		# adult-tree silhouette so towns and forests don't look mismatched.
 		var stage: int = bld.stage
+		var bld_complete_pixel: float = TREE_BASE_PIXEL
 		if stage == 4:
 			sprite.modulate = Color(1, 1, 1, 1)
-			sprite.pixel_size = 0.035
+			sprite.pixel_size = bld_complete_pixel
 		elif stage == 3:
 			sprite.modulate = Color(0.9, 0.9, 0.9, 0.95)
-			sprite.pixel_size = 0.032
+			sprite.pixel_size = bld_complete_pixel * 0.92
 		elif stage == 2:
 			sprite.modulate = Color(0.7, 0.7, 0.7, 0.85)
-			sprite.pixel_size = 0.028
+			sprite.pixel_size = bld_complete_pixel * 0.78
 		elif stage == 1:
 			sprite.modulate = Color(0.6, 0.6, 0.5, 0.7)
-			sprite.pixel_size = 0.021
+			sprite.pixel_size = bld_complete_pixel * 0.6
 		else:
 			sprite.modulate = Color(0.5, 0.5, 0.4, 0.5)
-			sprite.pixel_size = 0.014
+			sprite.pixel_size = bld_complete_pixel * 0.4
 
 		var pos: Vector3 = hex_center(int(bld.tile_x), int(bld.tile_y))
 		sprite.position = Vector3(pos.x, _ground_anchor_y(pos.y, HOUSE_TEX_H, sprite.pixel_size), pos.z)
+
+
+# ─── Grass decoration (mega-optimised cross-billboard MultiMesh) ─────
+#
+# One MultiMeshInstance3D for the entire map: the per-instance "mesh"
+# is itself a CROSS of two perpendicular quads (so each grass tuft
+# looks 3-D from any orbit angle), and we bake all transforms once
+# during world load. After bake the GPU just instances + applies the
+# shared vegetation_wind shader — no per-frame script work, one draw
+# call regardless of tuft count.
+const GRASS_PIXEL := 0.005
+const GRASS_QUAD_HALF_W := 0.32   ## Half-width of each cross quad (world units).
+const GRASS_QUAD_HEIGHT := 0.64   ## Height of each cross quad (world units).
+const GRASS_TILE_OFFSET_RADIUS := 0.55
+
+## Build the X-shape (two perpendicular quads in one ArrayMesh) used as
+## the per-instance mesh of the grass MultiMesh.
+func _build_grass_cross_mesh() -> ArrayMesh:
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var normals := PackedVector3Array()
+	var indices := PackedInt32Array()
+
+	var hw := GRASS_QUAD_HALF_W
+	var h := GRASS_QUAD_HEIGHT
+
+	# Two perpendicular quads (XY-plane and ZY-plane), both anchored at
+	# y = 0 (root) growing up to y = h (top).
+	var quad_axes: Array[Vector3] = [Vector3(1, 0, 0), Vector3(0, 0, 1)]
+	for axis in quad_axes:
+		var base_idx := verts.size()
+		verts.append(Vector3(-hw * axis.x, 0.0, -hw * axis.z))
+		verts.append(Vector3( hw * axis.x, 0.0,  hw * axis.z))
+		verts.append(Vector3( hw * axis.x, h,    hw * axis.z))
+		verts.append(Vector3(-hw * axis.x, h,   -hw * axis.z))
+		# UV: V grows top→bottom of the texture (top of plant = V 0).
+		uvs.append(Vector2(0.0, 1.0))
+		uvs.append(Vector2(1.0, 1.0))
+		uvs.append(Vector2(1.0, 0.0))
+		uvs.append(Vector2(0.0, 0.0))
+		# Normals point along the quad axis (so it shades like a
+		# vertical card facing the perpendicular direction).
+		var n := Vector3(axis.z, 0.0, axis.x)   # 90° rotation in XZ
+		for _i in 4:
+			normals.append(n)
+		indices.append(base_idx + 0)
+		indices.append(base_idx + 1)
+		indices.append(base_idx + 2)
+		indices.append(base_idx + 0)
+		indices.append(base_idx + 2)
+		indices.append(base_idx + 3)
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+## Deterministic per-tile pseudo-random in [0, 1).
+func _grass_hash(seed_a: int, seed_b: int, salt: int) -> float:
+	var h: int = (seed_a * 73856093) ^ (seed_b * 19349663) ^ (salt * 83492791)
+	# Fold to [0, 1).
+	return fposmod(float(h) * 0.0001, 1.0)
+
+func _build_grass_multimesh() -> void:
+	if _grass_texture == null or _grass_wind_material == null:
+		return
+
+	# 1. Count instances first — biome-driven density.
+	var instance_count: int = 0
+	for r in _dims.y:
+		for q in _dims.x:
+			var biome: int = int(_state.tile_biome(q, r))
+			if GRASS_DENSITY_PER_BIOME.has(biome):
+				instance_count += int(GRASS_DENSITY_PER_BIOME[biome])
+	if instance_count <= 0:
+		print("[HexGrid] No grass instances to bake.")
+		return
+
+	# 2. Build the per-instance cross mesh + wire up the shared shader.
+	var cross := _build_grass_cross_mesh()
+	cross.surface_set_material(0, _grass_wind_material)
+
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = cross
+	mm.instance_count = instance_count
+
+	# 3. Bake transforms (and a subtle per-tuft tint).
+	var idx: int = 0
+	var base_tint := Color(1.0, 1.0, 1.0, 1.0)
+	for r in _dims.y:
+		for q in _dims.x:
+			var biome: int = int(_state.tile_biome(q, r))
+			if not GRASS_DENSITY_PER_BIOME.has(biome):
+				continue
+			var density: int = int(GRASS_DENSITY_PER_BIOME[biome])
+			var center: Vector3 = hex_to_world(q, r)
+			for k in density:
+				var rx: float = (_grass_hash(q, r, k * 2 + 0) - 0.5) \
+					* GRASS_TILE_OFFSET_RADIUS * 2.0
+				var rz: float = (_grass_hash(q, r, k * 2 + 1) - 0.5) \
+					* GRASS_TILE_OFFSET_RADIUS * 2.0
+				var yaw: float = _grass_hash(q, r, k + 311) * TAU
+				var s: float = 0.7 + _grass_hash(q, r, k + 53) * 0.6  # 0.7..1.3
+				var t := Transform3D()
+				t.basis = Basis(Vector3.UP, yaw).scaled(Vector3(s, s, s))
+				t.origin = Vector3(
+					center.x + rx,
+					center.y + GROUND_BIAS,
+					center.z + rz,
+				)
+				mm.set_instance_transform(idx, t)
+				# Slight per-tuft hue jitter so the field isn't flat.
+				var tint_v: float = 0.85 + _grass_hash(q, r, k + 97) * 0.30
+				mm.set_instance_color(
+					idx,
+					base_tint * Color(tint_v, tint_v, tint_v, 1.0),
+				)
+				idx += 1
+
+	# 4. Drop into the scene tree under a dedicated node so
+	#    Phase 5's auto-camera and any future culling layer can find
+	#    it by name.
+	var prev: Node = get_node_or_null("GrassMultiMesh")
+	if prev:
+		prev.queue_free()
+	_grass_multimesh = MultiMeshInstance3D.new()
+	_grass_multimesh.name = "GrassMultiMesh"
+	_grass_multimesh.multimesh = mm
+	add_child(_grass_multimesh)
+	print("[HexGrid] Grass MultiMesh: %d cross-billboard tufts, 1 draw call." % instance_count)
+
+
+# ─── Falling leaves (single global GPUParticles3D) ───────────────────
+#
+# One particle system covers the whole world. Leaves spawn high above
+# the canopy, fall slowly, drift on a soft horizontal wind. ~300
+# concurrent particles total — visually "everywhere", measurably free.
+func _spawn_leaves_particles() -> void:
+	if _grass_texture == null:   # use grass green as a leaf stand-in
+		return
+
+	var rect: AABB = world_rect_3d()
+	var canopy_y: float = TREE_BASE_PIXEL * TREE_TEX_H + 0.5
+
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(rect.size.x * 0.5, 0.01, rect.size.z * 0.5)
+	pm.gravity = Vector3(0.0, -0.35, 0.0)
+	pm.initial_velocity_min = 0.05
+	pm.initial_velocity_max = 0.15
+	# Very gentle horizontal drift so leaves don't fall straight down.
+	pm.direction = Vector3(0.4, -1.0, 0.2)
+	pm.spread = 25.0
+	pm.angular_velocity_min = -45.0
+	pm.angular_velocity_max =  45.0
+	pm.scale_min = 0.6
+	pm.scale_max = 1.0
+	pm.color = Color(0.85, 1.0, 0.7, 1.0)
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.15, 0.15)
+	var leaf_mat := StandardMaterial3D.new()
+	leaf_mat.albedo_texture = _grass_texture
+	leaf_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS
+	leaf_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	leaf_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	leaf_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	leaf_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	leaf_mat.billboard_keep_scale = true
+	leaf_mat.no_depth_test = false
+	quad.material = leaf_mat
+
+	var gp := GPUParticles3D.new()
+	gp.name = "LeavesParticles"
+	gp.amount = 300
+	gp.lifetime = 8.0
+	gp.preprocess = 4.0
+	gp.fixed_fps = 30
+	gp.process_material = pm
+	gp.draw_pass_1 = quad
+	gp.transform.origin = Vector3(
+		rect.position.x + rect.size.x * 0.5,
+		canopy_y,
+		rect.position.z + rect.size.z * 0.5,
+	)
+	gp.visibility_aabb = AABB(
+		Vector3(rect.position.x, -1.0, rect.position.z),
+		Vector3(rect.size.x, canopy_y + 4.0, rect.size.z),
+	)
+
+	var prev: Node = get_node_or_null("LeavesParticles")
+	if prev:
+		prev.queue_free()
+	_leaves_particles = gp
+	add_child(gp)
+	print("[HexGrid] Falling leaves particles spawned (1 GPUParticles3D, amount=%d)." % gp.amount)
+
+
+# ─── Fireflies (single global GPUParticles3D, on at night only) ──────
+#
+# Like the falling leaves, this is one particle system covering the
+# whole map. The TimeOfDay autoload toggles emission on/off when the
+# phase enters/leaves PHASE_NIGHT, so we pay zero CPU during the day
+# (zero spawns) and at most a few hundred small additive quads at
+# night. Net cost is ~0.05 ms GPU on a mid-range card.
+var _fireflies_particles: GPUParticles3D
+const _FIREFLIES_AMOUNT_NIGHT := 500
+
+func _spawn_fireflies_particles() -> void:
+	var rect: AABB = world_rect_3d()
+
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = Vector3(rect.size.x * 0.5, 0.6, rect.size.z * 0.5)
+	pm.gravity = Vector3.ZERO
+	pm.initial_velocity_min = 0.05
+	pm.initial_velocity_max = 0.15
+	pm.direction = Vector3(0.0, 1.0, 0.0)
+	pm.spread = 180.0
+	pm.angular_velocity_min = 0.0
+	pm.angular_velocity_max = 0.0
+	# Soft drift so they don't hold a perfect line.
+	pm.linear_accel_min = -0.05
+	pm.linear_accel_max = 0.05
+	# Fade in/out via colour ramp so the additive blend doesn't pop.
+	var ramp := Gradient.new()
+	ramp.add_point(0.0, Color(0.95, 1.00, 0.55, 0.0))
+	ramp.add_point(0.15, Color(0.95, 1.00, 0.55, 0.85))
+	ramp.add_point(0.85, Color(0.95, 1.00, 0.55, 0.85))
+	ramp.add_point(1.0, Color(0.95, 1.00, 0.55, 0.0))
+	var ramp_tex := GradientTexture1D.new()
+	ramp_tex.gradient = ramp
+	pm.color_ramp = ramp_tex
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.12, 0.12)
+	var leaf_mat := StandardMaterial3D.new()
+	leaf_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	leaf_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	leaf_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	leaf_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD   # glowing dot feel
+	leaf_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	leaf_mat.billboard_keep_scale = true
+	leaf_mat.albedo_color = Color(0.95, 1.0, 0.55, 1.0)
+	leaf_mat.no_depth_test = false
+	quad.material = leaf_mat
+
+	var gp := GPUParticles3D.new()
+	gp.name = "FirefliesParticles"
+	gp.amount = _FIREFLIES_AMOUNT_NIGHT
+	gp.lifetime = 6.0
+	gp.preprocess = 2.0
+	gp.fixed_fps = 30
+	gp.emitting = false   # off until night phase fires the listener
+	gp.process_material = pm
+	gp.draw_pass_1 = quad
+	gp.transform.origin = Vector3(
+		rect.position.x + rect.size.x * 0.5,
+		1.2,    # hover above ground
+		rect.position.z + rect.size.z * 0.5,
+	)
+	gp.visibility_aabb = AABB(
+		Vector3(rect.position.x, -1.0, rect.position.z),
+		Vector3(rect.size.x, 5.0, rect.size.z),
+	)
+
+	var prev: Node = get_node_or_null("FirefliesParticles")
+	if prev:
+		prev.queue_free()
+	_fireflies_particles = gp
+	add_child(gp)
+
+	# Wire up to the day/night cycle: emit only during the NIGHT phase.
+	# TimeOfDay is registered as an autoload (project.godot), so the
+	# global identifier always resolves at runtime.
+	TimeOfDay.register_phase_listener(_on_phase_changed_fireflies)
+	print("[HexGrid] Fireflies particle system spawned (off until night).")
+
+func _on_phase_changed_fireflies(phase: String) -> void:
+	if _fireflies_particles == null:
+		return
+	_fireflies_particles.emitting = (phase == TimeOfDay.PHASE_NIGHT)
+
 
 # ─── Territory overlay ──────────────────────────────────────────────────────
 ## Compares the sim's [territory_version] against our last cached value.

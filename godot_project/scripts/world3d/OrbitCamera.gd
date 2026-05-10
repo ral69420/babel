@@ -46,7 +46,26 @@ func set_world_bounds(bounds: AABB) -> void:
 	_pivot = bounds.get_center()
 	_pivot.y = 0.0
 	_distance = bounds.size.length() * 0.4
+	_clamp_pivot_to_bounds()
 	_update_transform()
+
+## Keep [_pivot] inside the world's horizontal extent so the player
+## cannot fly the camera off the map. Pitched-down view keeps a small
+## margin so the edge tile stays visible rather than at the screen edge.
+func _clamp_pivot_to_bounds() -> void:
+	if _world_bounds.size.x <= 0.0 or _world_bounds.size.z <= 0.0:
+		return
+	var margin: float = 1.0
+	_pivot.x = clampf(
+		_pivot.x,
+		_world_bounds.position.x + margin,
+		_world_bounds.position.x + _world_bounds.size.x - margin,
+	)
+	_pivot.z = clampf(
+		_pivot.z,
+		_world_bounds.position.z + margin,
+		_world_bounds.position.z + _world_bounds.size.z - margin,
+	)
 
 func get_zoom_level() -> float:
 	return _distance
@@ -57,6 +76,7 @@ func focus_on(world_pos: Vector3) -> void:
 	_pivot = world_pos
 	_pivot.y = 0.0
 	_distance = clampf(_world_bounds.size.length() * 0.12, MIN_DISTANCE, 80.0)
+	_clamp_pivot_to_bounds()
 	_update_transform()
 
 ## Smoothly slide the camera pivot to [world_pos] over [duration]
@@ -140,6 +160,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# right, drag down → camera moves backward (away from look dir).
 			_pivot += right * mm.relative.x * pan_scale
 			_pivot -= forward * mm.relative.y * pan_scale
+			_clamp_pivot_to_bounds()
 			_update_transform()
 
 func _process(delta: float) -> void:
@@ -167,6 +188,7 @@ func _process(delta: float) -> void:
 		var speed: float = KEY_PAN_SPEED * delta * (_distance / 40.0)
 		_pivot += right * move.x * speed
 		_pivot += forward * move.y * speed
+		_clamp_pivot_to_bounds()
 		_update_transform()
 
 	# Q/E rotation
