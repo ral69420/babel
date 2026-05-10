@@ -56,7 +56,7 @@ func refresh() -> void:
 	]
 
 	if _orbit_cam:
-		coords_label.text = "zoom %.0f" % _orbit_cam.get_zoom_level()
+		coords_label.text = "zoom %.0f  ·  [T] borders" % _orbit_cam.get_zoom_level()
 	hover_label.text = ""
 
 func _wire_speed_buttons() -> void:

@@ -59,6 +59,15 @@ const CIV_WOOD_TARGET := BUILDING_TOTAL_WOOD * 2
 ## How far a chopper will walk for a tree (Manhattan distance, tiles).
 const CHOPPER_RANGE := 18
 
+# ── Territory ──────────────────────────────────────────────────────────────────
+## Tiles within this Manhattan distance of any of a civ's buildings are
+## considered claimed by that civ. Conflicts are resolved by closest
+## building.
+const TERRITORY_RADIUS := 12
+## Recompute interval (sim-days). Lower = snappier border updates, more
+## CPU; 10 days is fine even on a 384² map.
+const TERRITORY_RECOMPUTE_DAYS := 10
+
 # ── Internal arrays ──────────────────────────────────────────────────
 var _biomes: PackedByteArray
 var _elevation: PackedByteArray
@@ -82,6 +91,12 @@ var next_tree_id: int = 0
 ## given tile is already occupied without an O(n) scan, which matters
 ## once we have ~20k trees on a 256×256 forested map.
 var _tree_at_tile: Dictionary = {}
+
+# ── Territory ownership ────────────────────────────────────────────────────────────────
+var _tile_owner: PackedInt32Array
+## Bumped whenever territory is recomputed; HexGrid watches this to know
+## when to rebuild the overlay meshes.
+var _territory_version: int = 0
 
 # ── Civilizations ────────────────────────────────────────────────────
 ## Each entry: { id, name, color, spawn_x, spawn_y }. Populated during
@@ -121,6 +136,11 @@ func start(seed_val: int, w: int = DEFAULT_MAP_W, h: int = DEFAULT_MAP_H, civ_co
 	_generate_world()
 	_seed_initial_trees()
 	_spawn_initial_civs(civ_count)
+	_tile_owner = PackedInt32Array()
+	_tile_owner.resize(map_w * map_h)
+	for i in _tile_owner.size():
+		_tile_owner[i] = -1
+	_recompute_territory()
 	world_started = true
 	print(
 		"[StubSim] World started. %dx%d, %d civs, NPCs: %d, Buildings: %d, Trees: %d"
@@ -161,6 +181,19 @@ func civ_wood(civ_id: int) -> int:
 	if civ_id < 0 or civ_id >= civs.size():
 		return 0
 	return int(civs[civ_id].stockpile.wood)
+
+## Civ that owns the tile at (x,y), or -1 if unclaimed / out of bounds.
+func tile_owner(x: int, y: int) -> int:
+	if x < 0 or y < 0 or x >= map_w or y >= map_h:
+		return -1
+	if _tile_owner.is_empty():
+		return -1
+	return _tile_owner[y * map_w + x]
+
+## Monotonic counter that increments each time territory is recomputed.
+## Renderers cache the last value they saw and rebuild only when it changes.
+func territory_version() -> int:
+	return _territory_version
 
 func advance(frame_ticks: int) -> int:
 	var total := frame_ticks * _time_scale
@@ -405,6 +438,8 @@ func _tick_daily() -> void:
 	_system_trees()
 	_system_construction()
 	_system_building_request()
+	if _current_sim_day() % TERRITORY_RECOMPUTE_DAYS == 0:
+		_recompute_territory()
 
 func _current_sim_day() -> int:
 	return _ticks / TICK_RATE
@@ -612,6 +647,51 @@ func _system_building_request() -> void:
 			# Assign builders
 			buildings[buildings.size() - 1].builder_ids = [npc.id, partner.id]
 			buildings[buildings.size() - 1].owner_pair = [npc.id, partner.id]
+
+# ─────────────────────────────────────────────────────────────────────
+# Territory
+# ─────────────────────────────────────────────────────────────────────
+## Recompute the per-tile civ ownership map. A tile is owned by the civ
+## whose nearest building is within [TERRITORY_RADIUS] tiles (Manhattan).
+## Ties broken by lower civ_id for determinism.
+##
+## This is O(map_w * map_h * num_buildings); on a 256² map with a few
+## dozen buildings that's ~2M ops per recompute, called every
+## [TERRITORY_RECOMPUTE_DAYS] sim-days.
+func _recompute_territory() -> void:
+	if _tile_owner.is_empty():
+		return
+	var n: int = map_w * map_h
+	for i in n:
+		_tile_owner[i] = -1
+	if buildings.is_empty():
+		_territory_version += 1
+		return
+	# Reusable best-distance map; smaller = closer.
+	var best_dist := PackedInt32Array()
+	best_dist.resize(n)
+	var sentinel: int = TERRITORY_RADIUS + 1
+	for i in n:
+		best_dist[i] = sentinel
+	for b in buildings:
+		var bx: int = int(b.tile_x)
+		var by: int = int(b.tile_y)
+		var civ_id: int = int(b.civ_id)
+		var x0: int = maxi(0, bx - TERRITORY_RADIUS)
+		var x1: int = mini(map_w - 1, bx + TERRITORY_RADIUS)
+		var y0: int = maxi(0, by - TERRITORY_RADIUS)
+		var y1: int = mini(map_h - 1, by + TERRITORY_RADIUS)
+		for ty in range(y0, y1 + 1):
+			var dy: int = absi(ty - by)
+			for tx in range(x0, x1 + 1):
+				var d: int = dy + absi(tx - bx)
+				if d > TERRITORY_RADIUS:
+					continue
+				var idx: int = ty * map_w + tx
+				if d < best_dist[idx] or (d == best_dist[idx] and civ_id < _tile_owner[idx]):
+					best_dist[idx] = d
+					_tile_owner[idx] = civ_id
+	_territory_version += 1
 
 # ─────────────────────────────────────────────────────────────────────
 # Tree systems
