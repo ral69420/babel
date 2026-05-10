@@ -59,8 +59,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			_update_transform()
 		elif mb.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging_orbit = mb.pressed
-		elif mb.button_index == MOUSE_BUTTON_RIGHT:
-			_dragging_pan = mb.pressed
+		elif mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_LEFT:
+			# Either mouse button drags the camera. Track which is held so a
+			# release of one doesn't cancel a drag started with the other.
+			if mb.pressed:
+				_dragging_pan = true
+			else:
+				_dragging_pan = (
+					Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+					or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+				)
 
 	# Orbit / Pan with mouse
 	if event is InputEventMouseMotion:
@@ -72,38 +80,44 @@ func _unhandled_input(event: InputEvent) -> void:
 			_update_transform()
 		elif _dragging_pan:
 			var right := _camera.global_transform.basis.x
-			var forward := _camera.global_transform.basis.z
+			# In Godot, Camera3D looks down its local -Z, so basis.z is the
+			# camera's *backward* direction. Negate to get true forward.
+			var forward := -_camera.global_transform.basis.z
 			forward.y = 0.0
 			forward = forward.normalized()
 			right.y = 0.0
 			right = right.normalized()
 			var pan_scale: float = _distance * 0.002
-			_pivot -= right * mm.relative.x * pan_scale
-			_pivot += forward * mm.relative.y * pan_scale
+			# Mouse-direction = view-direction: drag right → camera moves
+			# right, drag down → camera moves backward (away from look dir).
+			_pivot += right * mm.relative.x * pan_scale
+			_pivot -= forward * mm.relative.y * pan_scale
 			_update_transform()
 
 func _process(delta: float) -> void:
-	# WASD / Arrow key panning
+	# WASD / Arrow key panning. W = forward, S = back, A = left, D = right,
+	# all relative to the camera's current horizontal facing direction.
 	var move := Vector2.ZERO
 	if Input.is_action_pressed("pan_up"):
-		move.y -= 1.0
+		move.y += 1.0   # forward
 	if Input.is_action_pressed("pan_down"):
-		move.y += 1.0
+		move.y -= 1.0   # backward
 	if Input.is_action_pressed("pan_left"):
-		move.x -= 1.0
+		move.x -= 1.0   # left
 	if Input.is_action_pressed("pan_right"):
-		move.x += 1.0
+		move.x += 1.0   # right
 
 	if move.length() > 0.0:
 		var right := _camera.global_transform.basis.x
-		var forward := _camera.global_transform.basis.z
+		# basis.z is camera-backward; use -basis.z for actual look direction.
+		var forward := -_camera.global_transform.basis.z
 		forward.y = 0.0
 		forward = forward.normalized()
 		right.y = 0.0
 		right = right.normalized()
 		var speed: float = KEY_PAN_SPEED * delta * (_distance / 40.0)
 		_pivot += right * move.x * speed
-		_pivot -= forward * move.y * speed
+		_pivot += forward * move.y * speed
 		_update_transform()
 
 	# Q/E rotation
