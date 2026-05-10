@@ -1,10 +1,20 @@
 extends Node3D
-## Generates a 3D hex-tile terrain mesh with smooth realistic elevation.
+## Generates a 3D continuous-landscape terrain mesh built on top of
+## hex-tile sim data.
 ##
-## Uses flat-top hexagons in offset coordinates (q, r).
-## Terrain has smooth elevation transitions using neighbor averaging.
-## Billboard sprites (buildings, trees, NPCs) are bottom-anchored to the
-## terrain so they don't sink into the mesh or appear to float at the same Y.
+## Internally the simulation still runs on flat-top hex tiles (q, r in
+## offset coords). What used to be rendered as a star-fan of 6
+## triangles per hex is now a single regular quad-grid heightmap that
+## subdivides each hex into [TERRAIN_SUBDIV]² cells and smooths
+## elevation + biome weights between neighbours via inverse-distance
+## weighting. The mesh is indexed (vertices shared) with central-
+## difference normals so shading is smooth across the whole map and
+## no hex outlines are visible from any orbit angle.
+##
+## Billboard sprites (buildings, trees, NPCs) are bottom-anchored to
+## the resulting heightmap via [_terrain_height_at] so they sit flush
+## with the visible surface instead of floating where the per-hex
+## smooth elevation used to be.
 
 const HEX_SIZE := 1.0
 const SQRT3 := 1.7320508
@@ -105,6 +115,23 @@ var _tree_wind_material: ShaderMaterial
 var _leaves_particles: GPUParticles3D
 var _smooth_elev: PackedFloat32Array
 
+## Continuous terrain heightmap. Built once per world in [_build_terrain]
+## and sampled by [_terrain_height_at] for both the visible mesh and any
+## entity that needs to sit on the ground. Indexed as `j * _grid_x + i`
+## where (i, j) walks a regular Cartesian grid in world (X, Z).
+var _terrain_heights: PackedFloat32Array
+var _grid_x: int = 0
+var _grid_z: int = 0
+var _grid_dx: float = 0.0
+var _grid_dz: float = 0.0
+
+## Resolution multiplier: each unit-radius hex is subdivided into
+## [TERRAIN_SUBDIV]² grid cells. SUBDIV=2 keeps the triangle count in
+## the same order of magnitude as the old fan mesh while killing the
+## faceted star pattern via smooth-shaded indexed quads.
+const TERRAIN_SUBDIV := 2
+const IDW_EPSILON := 1.0e-4
+
 # Territory overlay
 var _territory_root: Node3D
 var _territory_visible: bool = true
@@ -179,7 +206,15 @@ func world_rect_3d() -> AABB:
 func hex_to_world(q: int, r: int) -> Vector3:
 	var x: float = HEX_SIZE * 1.5 * q
 	var z: float = HEX_SIZE * SQRT3 * (r + 0.5 * (q & 1))
-	var elev: float = _get_smooth_elevation(q, r)
+	# Anchor entities to the actually-rendered surface so billboards
+	# can never float or sink relative to the visible hills. Falls back
+	# to the per-tile smooth elevation while the heightmap is still
+	# being built (early ticks during world setup).
+	var elev: float
+	if _grid_x > 0 and _grid_z > 0:
+		elev = _terrain_height_at(x, z)
+	else:
+		elev = _get_smooth_elevation(q, r)
 	return Vector3(x, elev, z)
 
 func hex_center(q: int, r: int) -> Vector3:
@@ -293,18 +328,24 @@ func _hex_corner_smooth(center_q: int, center_r: int, center_pos: Vector3, i: in
 	var angle_rad: float = deg_to_rad(angle_deg)
 	var corner_x: float = center_pos.x + HEX_SIZE * HEX_CORNER_SCALE * cos(angle_rad)
 	var corner_z: float = center_pos.z + HEX_SIZE * HEX_CORNER_SCALE * sin(angle_rad)
-	# Average elevation between center and adjacent hex for smooth edges
-	var adj := _hex_neighbors(center_q, center_r)
-	var corner_y: float = center_pos.y
-	# Blend with the two adjacent hexes that share this corner
-	var n1_idx: int = i % 6
-	var n2_idx: int = (i + 5) % 6
-	if n1_idx < adj.size() and n2_idx < adj.size():
-		var n1: Vector2i = adj[n1_idx]
-		var n2: Vector2i = adj[n2_idx]
-		var e1: float = _get_smooth_elevation(n1.x, n1.y)
-		var e2: float = _get_smooth_elevation(n2.x, n2.y)
-		corner_y = (center_pos.y + e1 + e2) / 3.0
+	# Sample the actually-rendered heightmap so any overlay drawn at hex
+	# corners (territory borders etc.) sits flush with the terrain.
+	# Falls back to averaging neighbour smooth elevations when the
+	# heightmap isn't built yet (e.g. very early world setup).
+	var corner_y: float
+	if _grid_x > 0 and _grid_z > 0:
+		corner_y = _terrain_height_at(corner_x, corner_z)
+	else:
+		var adj := _hex_neighbors(center_q, center_r)
+		corner_y = center_pos.y
+		var n1_idx: int = i % 6
+		var n2_idx: int = (i + 5) % 6
+		if n1_idx < adj.size() and n2_idx < adj.size():
+			var n1: Vector2i = adj[n1_idx]
+			var n2: Vector2i = adj[n2_idx]
+			var e1: float = _get_smooth_elevation(n1.x, n1.y)
+			var e2: float = _get_smooth_elevation(n2.x, n2.y)
+			corner_y = (center_pos.y + e1 + e2) / 3.0
 	return Vector3(corner_x, corner_y, corner_z)
 
 # ─── Terrain mesh generation ────────────────────────────────────────
@@ -333,6 +374,102 @@ func _biome_weight_color(biome: int) -> Color:
 			-1: return Color(0.0, 0.0, 0.0, 0.0)  # ocean (5th, implicit)
 	return Color(1.0, 0.0, 0.0, 0.0)
 
+## ─── Continuous heightmap sampling ──────────────────────────────────
+##
+## The terrain mesh is a regular quad grid in world (X, Z); these
+## helpers blend the underlying per-hex sim data into smooth fields
+## that the mesh builder can sample at any sub-tile (X, Z). All math
+## is deterministic — same dims + same per-tile biome/elev → identical
+## heightmap byte-for-byte.
+func _world_to_approx_hex(wx: float, wz: float) -> Vector2i:
+	var q_f: float = wx / (HEX_SIZE * 1.5)
+	var q: int = int(round(q_f))
+	var z_off: float = 0.5 * float(q & 1)
+	var r: int = int(round(wz / (HEX_SIZE * SQRT3) - z_off))
+	return Vector2i(q, r)
+
+## Inverse-distance-weighted blend over the seven-hex disc (centre +
+## ring of 6) covering any point inside the map. Out-of-bounds
+## neighbours fall back to ocean values so coast lines drop gracefully
+## to sea level instead of hard-clipping at the map edge.
+func _idw_weight(q: int, r: int, wx: float, wz: float) -> float:
+	var hx: float = HEX_SIZE * 1.5 * float(q)
+	var hz: float = HEX_SIZE * SQRT3 * (float(r) + 0.5 * float(q & 1))
+	var d2: float = (wx - hx) * (wx - hx) + (wz - hz) * (wz - hz)
+	return 1.0 / (d2 + IDW_EPSILON)
+
+func _hex_elev_or_ocean(q: int, r: int) -> float:
+	if q < 0 or r < 0 or q >= _dims.x or r >= _dims.y:
+		return BIOME_BASE_ELEV[0]
+	return _smooth_elev[r * _dims.x + q]
+
+func _hex_biome_color_or_ocean(q: int, r: int) -> Color:
+	if q < 0 or r < 0 or q >= _dims.x or r >= _dims.y:
+		return Color(0.0, 0.0, 0.0, 0.0)
+	return _biome_weight_color(int(_state.tile_biome(q, r)))
+
+func _sample_terrain_elev(wx: float, wz: float) -> float:
+	var approx: Vector2i = _world_to_approx_hex(wx, wz)
+	var ring := _hex_neighbors(approx.x, approx.y)
+	var total_w: float = _idw_weight(approx.x, approx.y, wx, wz)
+	var total_e: float = total_w * _hex_elev_or_ocean(approx.x, approx.y)
+	for n: Vector2i in ring:
+		var w: float = _idw_weight(n.x, n.y, wx, wz)
+		total_w += w
+		total_e += w * _hex_elev_or_ocean(n.x, n.y)
+	if total_w <= 0.0:
+		return BIOME_BASE_ELEV[0]
+	return total_e / total_w
+
+func _sample_terrain_biome(wx: float, wz: float) -> Color:
+	var approx: Vector2i = _world_to_approx_hex(wx, wz)
+	var ring := _hex_neighbors(approx.x, approx.y)
+	var w0: float = _idw_weight(approx.x, approx.y, wx, wz)
+	var c0: Color = _hex_biome_color_or_ocean(approx.x, approx.y)
+	var total_w: float = w0
+	var sum_r: float = w0 * c0.r
+	var sum_g: float = w0 * c0.g
+	var sum_b: float = w0 * c0.b
+	var sum_a: float = w0 * c0.a
+	for n: Vector2i in ring:
+		var w: float = _idw_weight(n.x, n.y, wx, wz)
+		var c: Color = _hex_biome_color_or_ocean(n.x, n.y)
+		total_w += w
+		sum_r += w * c.r
+		sum_g += w * c.g
+		sum_b += w * c.b
+		sum_a += w * c.a
+	if total_w <= 0.0:
+		return Color(0.0, 0.0, 0.0, 0.0)
+	var inv: float = 1.0 / total_w
+	return Color(sum_r * inv, sum_g * inv, sum_b * inv, sum_a * inv)
+
+## Public-ish helper that gives entity-anchoring code (buildings, NPCs,
+## trees) the same height the terrain mesh draws at world (X, Z).
+func _terrain_height_at(wx: float, wz: float) -> float:
+	if _grid_x <= 1 or _grid_z <= 1:
+		return BIOME_BASE_ELEV[0]
+	var fi: float = clampf(wx / _grid_dx, 0.0, float(_grid_x - 1))
+	var fj: float = clampf(wz / _grid_dz, 0.0, float(_grid_z - 1))
+	var i0: int = int(floor(fi))
+	var j0: int = int(floor(fj))
+	var i1: int = mini(i0 + 1, _grid_x - 1)
+	var j1: int = mini(j0 + 1, _grid_z - 1)
+	var u: float = fi - float(i0)
+	var v: float = fj - float(j0)
+	var h00: float = _terrain_heights[j0 * _grid_x + i0]
+	var h10: float = _terrain_heights[j0 * _grid_x + i1]
+	var h01: float = _terrain_heights[j1 * _grid_x + i0]
+	var h11: float = _terrain_heights[j1 * _grid_x + i1]
+	var hx0: float = lerpf(h00, h10, u)
+	var hx1: float = lerpf(h01, h11, u)
+	return lerpf(hx0, hx1, v)
+
+func _grid_height_at(i: int, j: int) -> float:
+	var ci: int = clampi(i, 0, _grid_x - 1)
+	var cj: int = clampi(j, 0, _grid_z - 1)
+	return _terrain_heights[cj * _grid_x + ci]
+
 ## Average biome weights of the three hexes that meet at this corner.
 ## Returns the blended Color used as the corner vertex's COLOR attribute.
 func _corner_weight_color(q: int, r: int, i: int) -> Color:
@@ -357,64 +494,87 @@ func _corner_weight_color(q: int, r: int, i: int) -> Color:
 	return Color(sum.r * inv, sum.g * inv, sum.b * inv, sum.a * inv)
 
 func _build_terrain() -> void:
-	print("[HexGrid] Building merged 3D terrain %d×%d (single draw call)..." % [_dims.x, _dims.y])
+	# Continuous quad-grid heightmap. Each unit-radius hex is split into
+	# TERRAIN_SUBDIV² Cartesian cells; vertices are shared between
+	# triangles so the indexed mesh smooths automatically and there are
+	# no visible hex outlines or facetted star fans. Per-vertex biome
+	# weights are still computed from the underlying tile data via the
+	# same IDW blend used for elevation, so biome transitions remain
+	# painted-on rather than geometric.
+	_grid_dx = HEX_SIZE * 1.5 / float(TERRAIN_SUBDIV)
+	_grid_dz = HEX_SIZE * SQRT3 / float(TERRAIN_SUBDIV)
+	_grid_x = _dims.x * TERRAIN_SUBDIV + 1
+	_grid_z = _dims.y * TERRAIN_SUBDIV + 1
+	var vert_count: int = _grid_x * _grid_z
+
+	print(
+		"[HexGrid] Building continuous 3D terrain %d×%d hexes → %d×%d grid (%d verts, single draw call)..."
+		% [_dims.x, _dims.y, _grid_x, _grid_z, vert_count]
+	)
 
 	var verts := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	verts.resize(vert_count)
+	uvs.resize(vert_count)
+	normals.resize(vert_count)
+	colors.resize(vert_count)
 
-	var tri_count: int = _dims.x * _dims.y * 6
-	verts.resize(tri_count * 3)
-	uvs.resize(tri_count * 3)
-	normals.resize(tri_count * 3)
-	colors.resize(tri_count * 3)
+	_terrain_heights = PackedFloat32Array()
+	_terrain_heights.resize(vert_count)
 
-	var uv_center := Vector2(0.5, 0.5)
-	var uv_corners: Array[Vector2] = []
-	for i in 6:
-		var angle: float = deg_to_rad(60.0 * i)
-		uv_corners.append(Vector2(0.5 + 0.5 * cos(angle), 0.5 + 0.5 * sin(angle)))
+	# Pass 1: sample elevation + biome-weight color at every grid vertex.
+	for j in _grid_z:
+		for i in _grid_x:
+			var wx: float = float(i) * _grid_dx
+			var wz: float = float(j) * _grid_dz
+			var elev: float = _sample_terrain_elev(wx, wz)
+			var biome_color: Color = _sample_terrain_biome(wx, wz)
+			var idx: int = j * _grid_x + i
+			_terrain_heights[idx] = elev
+			verts[idx] = Vector3(wx, elev, wz)
+			# UV is set per-vertex purely as a fallback for shaders that
+			# don't compute world-space UVs themselves; the bundled
+			# `terrain_blend.gdshader` uses VERTEX.xz directly.
+			uvs[idx] = Vector2(wx, wz)
+			colors[idx] = biome_color
 
-	var idx: int = 0
-	for r in _dims.y:
-		for q in _dims.x:
-			var biome: int = clampi(_state.tile_biome(q, r), 0, BIOME_TEXTURES.size() - 1)
-			var center: Vector3 = hex_to_world(q, r)
-			var center_color: Color = _biome_weight_color(biome)
+	# Pass 2: smooth normals via central differences on the heightmap.
+	# Boundary vertices fall back to forward / backward differences so
+	# the entire mesh has a valid lit surface without seams.
+	for j in _grid_z:
+		for i in _grid_x:
+			var hl: float = _grid_height_at(i - 1, j)
+			var hr: float = _grid_height_at(i + 1, j)
+			var hd: float = _grid_height_at(i, j - 1)
+			var hu: float = _grid_height_at(i, j + 1)
+			var nx: float = (hl - hr) / (2.0 * _grid_dx)
+			var nz: float = (hd - hu) / (2.0 * _grid_dz)
+			var n := Vector3(nx, 1.0, nz).normalized()
+			normals[j * _grid_x + i] = n
 
-			var corners: Array[Vector3] = []
-			var corner_colors: Array[Color] = []
-			for i in 6:
-				corners.append(_hex_corner_smooth(q, r, center, i))
-				corner_colors.append(_corner_weight_color(q, r, i))
-
-			for i in 6:
-				var nxt: int = (i + 1) % 6
-				var v0: Vector3 = center
-				var v1: Vector3 = corners[i]
-				var v2: Vector3 = corners[nxt]
-				var edge1: Vector3 = v1 - v0
-				var edge2: Vector3 = v2 - v0
-				var normal: Vector3 = edge1.cross(edge2).normalized()
-				if normal.y < 0:
-					normal = -normal
-
-				verts[idx] = v0
-				uvs[idx] = uv_center
-				normals[idx] = normal
-				colors[idx] = center_color
-				idx += 1
-				verts[idx] = v1
-				uvs[idx] = uv_corners[i]
-				normals[idx] = normal
-				colors[idx] = corner_colors[i]
-				idx += 1
-				verts[idx] = v2
-				uvs[idx] = uv_corners[nxt]
-				normals[idx] = normal
-				colors[idx] = corner_colors[nxt]
-				idx += 1
+	# Pass 3: triangle indices. Each grid cell becomes two triangles;
+	# winding is chosen so the cross product points along +Y (matches
+	# the `cull_back` shader render mode in `terrain_blend.gdshader`).
+	var cell_x: int = _grid_x - 1
+	var cell_z: int = _grid_z - 1
+	var indices := PackedInt32Array()
+	indices.resize(cell_x * cell_z * 6)
+	var ii: int = 0
+	for j in cell_z:
+		for i in cell_x:
+			var v00: int = j * _grid_x + i
+			var v10: int = j * _grid_x + (i + 1)
+			var v01: int = (j + 1) * _grid_x + i
+			var v11: int = (j + 1) * _grid_x + (i + 1)
+			indices[ii] = v00
+			indices[ii + 1] = v01
+			indices[ii + 2] = v10
+			indices[ii + 3] = v10
+			indices[ii + 4] = v01
+			indices[ii + 5] = v11
+			ii += 6
 
 	var arr := []
 	arr.resize(Mesh.ARRAY_MAX)
@@ -422,6 +582,7 @@ func _build_terrain() -> void:
 	arr[Mesh.ARRAY_TEX_UV] = uvs
 	arr[Mesh.ARRAY_NORMAL] = normals
 	arr[Mesh.ARRAY_COLOR] = colors
+	arr[Mesh.ARRAY_INDEX] = indices
 
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
@@ -437,7 +598,7 @@ func _build_terrain() -> void:
 	add_child(mi)
 
 	_add_water_plane()
-	print("[HexGrid] Terrain built: %d triangles, 1 draw call." % tri_count)
+	print("[HexGrid] Terrain built: %d triangles, 1 draw call." % (cell_x * cell_z * 2))
 
 ## Optional water plane sitting just below the terrain ocean tiles —
 ## adds depth to the deep-water reads. The merged terrain mesh already
