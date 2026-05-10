@@ -41,11 +41,17 @@ const BIOME_BASE_ELEV := [
 	0.1,    # Tundra
 ]
 
+## Fallback civ colour palette used when [GameState.get_civs] is empty
+## (e.g. running directly from Main.tscn without going through the menu).
+## Must contain at least as many entries as the new-game civ-count slider
+## allows (currently 6).
 const CIV_COLORS := [
-	Color(1.0, 0.5, 0.5),
-	Color(0.5, 0.7, 1.0),
-	Color(0.5, 1.0, 0.6),
-	Color(1.0, 0.9, 0.4),
+	Color(1.00, 0.50, 0.50),
+	Color(0.50, 0.70, 1.00),
+	Color(0.55, 1.00, 0.60),
+	Color(1.00, 0.90, 0.40),
+	Color(0.85, 0.55, 1.00),
+	Color(1.00, 0.65, 0.30),
 ]
 
 var _state: Node = null

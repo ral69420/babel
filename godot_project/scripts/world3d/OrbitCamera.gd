@@ -47,6 +47,14 @@ func set_world_bounds(bounds: AABB) -> void:
 func get_zoom_level() -> float:
 	return _distance
 
+## Re-centre the camera on a world-space point, keeping the current
+## orbit angle but pulling in to a closer "settlement" zoom.
+func focus_on(world_pos: Vector3) -> void:
+	_pivot = world_pos
+	_pivot.y = 0.0
+	_distance = clampf(_world_bounds.size.length() * 0.12, MIN_DISTANCE, 80.0)
+	_update_transform()
+
 func _unhandled_input(event: InputEvent) -> void:
 	# Zoom
 	if event is InputEventMouseButton:

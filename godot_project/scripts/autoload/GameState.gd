@@ -30,13 +30,28 @@ func _init_sim() -> void:
 	_society.name = "SocietyLoop"
 	add_child(_society)
 
-func start_world(seed_value: int, width: int, height: int) -> bool:
+func start_world(seed_value: int, width: int, height: int, civ_count: int = 4) -> bool:
 	if not sim_ready:
 		return false
 	var ok: bool = sim.start(seed_value, width, height)
 	if _society and _society != sim:
-		_society.start(seed_value, width, height)
+		_society.start(seed_value, width, height, civ_count)
 	return ok
+
+## True once a world has been generated for the current process. Lets
+## Main.tscn skip a redundant generation when the menu / new-game flow
+## already produced one.
+func world_ready() -> bool:
+	if _society == null:
+		return false
+	var v: Variant = _society.get("world_started")
+	return typeof(v) == TYPE_BOOL and v
+
+## Mark the current world as discarded. Next call to [start_world] will
+## re-generate. Used when the player backs out of CivSelect.
+func clear_world() -> void:
+	if _society:
+		_society.set("world_started", false)
 
 func advance(frame_ticks: int) -> int:
 	if not sim_ready:
@@ -126,3 +141,13 @@ func get_buildings() -> Array:
 	if _society and _society.has_method("get_buildings"):
 		return _society.get_buildings()
 	return []
+
+func get_civs() -> Array:
+	if _society and _society.has_method("get_civs"):
+		return _society.get_civs()
+	return []
+
+func civ_color(civ_id: int) -> Color:
+	if _society and _society.has_method("civ_color"):
+		return _society.civ_color(civ_id)
+	return Color(0.7, 0.7, 0.7)
